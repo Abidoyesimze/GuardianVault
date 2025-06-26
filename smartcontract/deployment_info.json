@@ -1,0 +1,13 @@
+{
+  "project": "ZK Guardians",
+  "status": "deployed",
+  "network": "starknet-sepolia",
+  "contract_address": "0x07361b735adfdcf23ac4c540446daed5440f9d80d70713400cdc0fe0b57ebec4",
+  "class_hash": "0x04eed9bcd0cb4f78d0d2bf3f87395242072f04eeda6592a6c0c275529af503cf",
+  "deployment_tx": "0x03d10e925cba8fb95a21a90b7689874dcd60e9eef56b3e03d3822f4f0453a816",
+  "deployment_date": "$(date)",
+  "explorer_links": {
+    "starkscan": "https://sepolia.starkscan.co/contract/0x07361b735adfdcf23ac4c540446daed5440f9d80d70713400cdc0fe0b57ebec4",
+    "voyager": "https://sepolia.voyager.online/contract/0x07361b735adfdcf23ac4c540446daed5440f9d80d70713400cdc0fe0b57ebec4"
+  }
+}
