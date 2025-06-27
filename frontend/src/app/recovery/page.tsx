@@ -9,7 +9,6 @@ import {
   AlertCircle, 
   RefreshCw, 
   Shield, 
-  Users,
   ArrowRight,
   Copy,
   ExternalLink,
@@ -120,15 +119,6 @@ export default function RecoveryPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const getStatusColor = (status: RecoveryStatus) => {
-    switch (status) {
-      case 'pending': return 'text-warning-400'
-      case 'approved': return 'text-success-400'
-      case 'failed': return 'text-error-400'
-      default: return 'text-neutral-400'
-    }
-  }
-
   const getStatusIcon = (status: RecoveryStatus) => {
     switch (status) {
       case 'pending': return <Clock className="h-5 w-5" />
@@ -231,7 +221,7 @@ export default function RecoveryPage() {
 
           {/* Info Card */}
           <div className="card p-6 bg-blue-500/5 border-blue-500/20">
-            <h3 className="text-blue-400 font-semibold mb-3">What We're Looking For</h3>
+            <h3 className="text-blue-400 font-semibold mb-3">What We&apos;re Looking For</h3>
             <ul className="text-blue-300 text-sm space-y-2">
               <li>• Existing guardian configuration for this wallet</li>
               <li>• Recovery threshold settings (how many approvals needed)</li>
@@ -393,7 +383,9 @@ export default function RecoveryPage() {
                 <div className="flex space-x-2">
                   <button
                     onClick={copyRecoveryLink}
-                    className="btn-secondary flex-1 flex items-center justify-center space-x-2"
+                    className={`btn-secondary flex-1 flex items-center justify-center space-x-2 ${
+                      copied ? 'text-success-400' : ''
+                    }`}
                   >
                     <Copy className="h-4 w-4" />
                     <span>{copied ? 'Copied!' : 'Copy Link'}</span>
@@ -443,7 +435,7 @@ export default function RecoveryPage() {
                   <li>• Guardians will receive and review your recovery request</li>
                   <li>• Once {recovery.requiredApprovals} guardians approve, recovery will complete</li>
                   <li>• Your old wallet assets will be transferred to your new wallet</li>
-                  <li>• You'll regain full access to your funds</li>
+                  <li>• You&apos;ll regain full access to your funds</li>
                 </ul>
               </div>
             </div>

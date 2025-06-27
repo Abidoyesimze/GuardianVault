@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAccount } from '@starknet-react/core'
-import { Wallet, Shield } from 'lucide-react'
+import { Wallet } from 'lucide-react'
 import { toast } from 'react-toastify'
 
 interface RouteProtectionProps {
@@ -56,7 +56,7 @@ export function RouteProtection({
             </div>
             <h2 className="text-2xl font-bold text-white">Wallet Required</h2>
             <p className="text-neutral-300 max-w-md mx-auto">
-              This page requires a connected wallet. You'll be redirected to the home page.
+              This page requires a connected wallet. You&apos;ll be redirected to the home page.
             </p>
           </div>
           <div className="status-warning p-4 rounded-lg">

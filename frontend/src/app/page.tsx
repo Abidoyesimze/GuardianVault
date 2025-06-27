@@ -1,9 +1,8 @@
 'use client'
 
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAccount } from '@starknet-react/core'
-import { Shield, Users, Lock, Zap, ArrowRight, CheckCircle, Star, ChevronRight } from 'lucide-react'
+import { Shield, Users, Lock, Zap, ArrowRight, Star, ChevronRight } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'react-toastify'
 
@@ -321,7 +320,7 @@ export default function HomePage() {
                 ))}
               </div>
               <blockquote className="text-neutral-200 text-lg leading-relaxed">
-                "{testimonial.content}"
+                &ldquo;{testimonial.content}&rdquo;
               </blockquote>
               <div>
                 <div className="font-bold text-white">{testimonial.name}</div>

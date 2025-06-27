@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useAccount } from '@starknet-react/core'
 import { useSearchParams } from 'next/navigation'
 import { 
@@ -10,12 +10,10 @@ import {
   XCircle, 
   Clock, 
   AlertTriangle,
-  ExternalLink,
   Copy,
   Eye,
   Wallet,
   ArrowRight,
-  AlertCircle,
   RefreshCw
 } from 'lucide-react'
 
@@ -40,7 +38,7 @@ type RecoveryRequest = {
 
 type GuardianStep = 'connect' | 'view-requests' | 'review-request' | 'confirm-approval' | 'completed'
 
-export default function GuardianPortalPage() {
+function GuardianPortalContent() {
   const { address, isConnected } = useAccount()
   const searchParams = useSearchParams()
   const recoveryId = searchParams.get('recovery')
@@ -53,20 +51,11 @@ export default function GuardianPortalPage() {
   const [copied, setCopied] = useState(false)
   const [approvalReason, setApprovalReason] = useState('')
 
-  useEffect(() => {
-    if (isConnected) {
-      if (recoveryId) {
-        loadSpecificRequest(recoveryId)
-      } else {
-        loadGuardianRequests()
-      }
-    }
-  }, [isConnected, recoveryId])
-
-  const loadGuardianRequests = async () => {
+  const loadGuardianRequests = useCallback(async () => {
     if (!isConnected) return
     
     setIsLoading(true)
+    setError(null)
     try {
       // TODO: Call smart contract to get recovery requests for this guardian
       await new Promise(resolve => setTimeout(resolve, 1500))
@@ -111,16 +100,17 @@ export default function GuardianPortalPage() {
       
       setRecoveryRequests(mockRequests)
       setCurrentStep('view-requests')
-    } catch (error) {
+    } catch (err) {
       setError('Failed to load recovery requests')
-      console.error('Failed to load requests:', error)
+      console.error('Failed to load requests:', err)
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [isConnected, address])
 
-  const loadSpecificRequest = async (requestId: string) => {
+  const loadSpecificRequest = useCallback(async (requestId: string) => {
     setIsLoading(true)
+    setError(null)
     try {
       // TODO: Load specific recovery request
       await new Promise(resolve => setTimeout(resolve, 1000))
@@ -145,15 +135,27 @@ export default function GuardianPortalPage() {
       
       setSelectedRequest(mockRequest)
       setCurrentStep('review-request')
-    } catch (error) {
+    } catch (err) {
       setError('Failed to load recovery request')
+      console.error('Failed to load specific request:', err)
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [address])
+
+  useEffect(() => {
+    if (isConnected) {
+      if (recoveryId) {
+        loadSpecificRequest(recoveryId)
+      } else {
+        loadGuardianRequests()
+      }
+    }
+  }, [isConnected, recoveryId, loadGuardianRequests, loadSpecificRequest])
 
   const approveRecovery = async (request: RecoveryRequest) => {
     setIsLoading(true)
+    setError(null)
     try {
       // TODO: Call smart contract to approve recovery
       await new Promise(resolve => setTimeout(resolve, 2000))
@@ -171,22 +173,25 @@ export default function GuardianPortalPage() {
       
       setSelectedRequest(updatedRequest)
       setCurrentStep('completed')
-    } catch (error) {
+    } catch (err) {
       setError('Failed to approve recovery')
+      console.error('Failed to approve recovery:', err)
     } finally {
       setIsLoading(false)
     }
   }
 
-  const rejectRecovery = async (request: RecoveryRequest) => {
+  const rejectRecovery = async () => {
     setIsLoading(true)
+    setError(null)
     try {
       // TODO: Call smart contract to reject recovery
       await new Promise(resolve => setTimeout(resolve, 1500))
       
       setCurrentStep('completed')
-    } catch (error) {
+    } catch (err) {
       setError('Failed to reject recovery')
+      console.error('Failed to reject recovery:', err)
     } finally {
       setIsLoading(false)
     }
@@ -289,7 +294,7 @@ export default function GuardianPortalPage() {
               <Shield className="h-16 w-16 text-neutral-600 mx-auto" />
               <h3 className="text-xl font-bold text-white">No Recovery Requests</h3>
               <p className="text-neutral-400">
-                You don't have any pending recovery requests at the moment.
+                You don&apos;t have any pending recovery requests at the moment.
               </p>
             </div>
           ) : (
@@ -333,7 +338,7 @@ export default function GuardianPortalPage() {
 
                   {request.description && (
                     <p className="text-neutral-300 text-sm mb-4 italic">
-                      "{request.description}"
+                      &ldquo;{request.description}&rdquo;
                     </p>
                   )}
 
@@ -347,8 +352,8 @@ export default function GuardianPortalPage() {
                     <div className="flex space-x-2">
                       <button
                         onClick={() => copyRequestLink(request.id)}
-                        className="btn-ghost p-2"
-                        title="Copy link"
+                        className={`btn-ghost p-2 ${copied ? 'text-success-400' : ''}`}
+                        title={copied ? 'Copied!' : 'Copy link'}
                       >
                         <Copy className="h-4 w-4" />
                       </button>
@@ -426,7 +431,7 @@ export default function GuardianPortalPage() {
               {selectedRequest.description && (
                 <div className="card p-6">
                   <h3 className="text-xl font-bold text-white mb-3">Recovery Reason</h3>
-                  <p className="text-neutral-300 italic">"{selectedRequest.description}"</p>
+                  <p className="text-neutral-300 italic">&ldquo;{selectedRequest.description}&rdquo;</p>
                 </div>
               )}
             </div>
@@ -489,7 +494,7 @@ export default function GuardianPortalPage() {
                   Approve Recovery
                 </button>
                 <button
-                  onClick={() => rejectRecovery(selectedRequest)}
+                  onClick={() => rejectRecovery()}
                   className="btn-secondary w-full text-lg py-4 border-error-500/50 text-error-400 hover:bg-error-500/10"
                   disabled={isLoading}
                 >
@@ -509,7 +514,7 @@ export default function GuardianPortalPage() {
             <CheckCircle className="h-16 w-16 text-primary-500 mx-auto" />
             <h2 className="text-2xl font-bold text-white">Confirm Approval</h2>
             <p className="text-neutral-300">
-              You're about to approve this wallet recovery request. This action cannot be undone.
+              You&apos;re about to approve this wallet recovery request. This action cannot be undone.
             </p>
           </div>
 
@@ -604,5 +609,32 @@ export default function GuardianPortalPage() {
         </div>
       )}
     </div>
+  )
+}
+
+function LoadingFallback() {
+  return (
+    <div className="max-w-4xl mx-auto space-y-8">
+      <div className="text-center space-y-4 animate-fade-in">
+        <h1 className="text-4xl lg:text-5xl font-bold text-white">
+          Guardian Portal
+        </h1>
+        <p className="text-xl text-neutral-300 max-w-2xl mx-auto">
+          Loading...
+        </p>
+      </div>
+      <div className="text-center py-12">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>
+        <p className="text-neutral-300">Loading recovery requests...</p>
+      </div>
+    </div>
+  )
+}
+
+export default function GuardianPortalPage() {
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <GuardianPortalContent />
+    </Suspense>
   )
 }

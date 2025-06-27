@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useAccount } from '@starknet-react/core'
-import { Plus, Trash2, Users, Shield, CheckCircle, ArrowRight, ArrowLeft, AlertCircle, Copy, ExternalLink } from 'lucide-react'
+import { Plus, Trash2, Users, Shield, CheckCircle, ArrowRight, ArrowLeft, AlertCircle } from 'lucide-react'
 
 type Guardian = {
   id: string
@@ -14,7 +14,7 @@ type Guardian = {
 type SetupStep = 'connect' | 'guardians' | 'threshold' | 'review' | 'complete'
 
 export default function SetupPage() {
-  const { address, isConnected } = useAccount()
+  const { isConnected } = useAccount()
   const [currentStep, setCurrentStep] = useState<SetupStep>(isConnected ? 'guardians' : 'connect')
   const [guardians, setGuardians] = useState<Guardian[]>([])
   const [newGuardianAddress, setNewGuardianAddress] = useState('')
@@ -315,7 +315,7 @@ export default function SetupPage() {
               <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4">
                 <h4 className="text-yellow-400 font-semibold mb-2">Threshold Explanation</h4>
                 <p className="text-yellow-300 text-sm">
-                  With {threshold} of {guardians.length} threshold, you'll need {threshold} guardians to approve any recovery request. 
+                  With {threshold} of {guardians.length} threshold, you&apos;ll need {threshold} guardians to approve any recovery request. 
                   Choose based on your security vs. convenience preference.
                 </p>
               </div>
@@ -339,7 +339,7 @@ export default function SetupPage() {
               <div className="card p-6">
                 <h3 className="text-xl font-bold text-white mb-4">Guardians ({guardians.length})</h3>
                 <div className="space-y-3">
-                  {guardians.map((guardian, index) => (
+                  {guardians.map((guardian) => (
                     <div key={guardian.id} className="flex items-center justify-between p-3 bg-neutral-900/50 rounded-lg">
                       <div>
                         <p className="text-white font-medium">{guardian.name}</p>
@@ -412,7 +412,7 @@ export default function SetupPage() {
               </div>
               
               <div className="border-t border-neutral-700 pt-6">
-                <h4 className="text-white font-semibold mb-3">What's Next?</h4>
+                <h4 className="text-white font-semibold mb-3">What&apos;s Next?</h4>
                 <ul className="text-neutral-300 text-sm space-y-2 text-left">
                   <li>• Your guardians can now help you recover your wallet</li>
                   <li>• Share the recovery link with trusted guardians</li>

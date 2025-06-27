@@ -2,6 +2,7 @@ import './globals.css'
 import { Inter } from 'next/font/google'
 import { StarknetProvider } from '@/components/StarknetProvider'
 import { Navbar } from '@/components/Navbar'
+import type { Metadata, Viewport } from 'next'
 
 const inter = Inter({ 
   subsets: ['latin'],
@@ -9,12 +10,66 @@ const inter = Inter({
   display: 'swap',
 })
 
-export const metadata = {
-  title: 'GuardianVault - Professional Wallet Recovery',
+export const metadata: Metadata = {
+  title: {
+    template: '%s - GuardianVault',
+    default: 'GuardianVault - Professional Wallet Recovery',
+  },
   description: 'Professional-grade wallet recovery system built on StarkNet using social recovery and zero-knowledge proofs. Secure, private, and user-friendly.',
-  keywords: 'wallet recovery, StarkNet, social recovery, zero-knowledge, crypto, blockchain, security',
+  keywords: ['wallet recovery', 'StarkNet', 'social recovery', 'zero-knowledge', 'crypto', 'blockchain', 'security'],
   authors: [{ name: 'GuardianVault Team' }],
-  viewport: 'width=device-width, initial-scale=1',
+  creator: 'GuardianVault',
+  publisher: 'GuardianVault',
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
+  openGraph: {
+    type: 'website',
+    locale: 'en_US',
+    url: 'https://guardianvault.app',
+    title: 'GuardianVault - Professional Wallet Recovery',
+    description: 'Professional-grade wallet recovery system built on StarkNet using social recovery and zero-knowledge proofs',
+    siteName: 'GuardianVault',
+    images: [
+      {
+        url: '/og-image.png',
+        width: 1200,
+        height: 630,
+        alt: 'GuardianVault - Professional Wallet Recovery',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'GuardianVault - Professional Wallet Recovery',
+    description: 'Professional-grade wallet recovery system built on StarkNet using social recovery and zero-knowledge proofs',
+    images: ['/og-image.png'],
+    creator: '@guardianvault',
+  },
+  icons: {
+    icon: '/favicon.ico',
+    shortcut: '/favicon-16x16.png',
+    apple: '/apple-touch-icon.png',
+  },
+  manifest: '/site.webmanifest',
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#0a0a0a' },
+  ],
 }
 
 export default function RootLayout({

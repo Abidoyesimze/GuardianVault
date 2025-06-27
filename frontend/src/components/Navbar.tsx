@@ -7,6 +7,9 @@ import { Shield, Menu, X, Wallet, ChevronDown, LogOut, Copy, ExternalLink } from
 import { useState, useEffect, useRef } from 'react'
 import { toast } from 'react-toastify'
 
+// Use Connector type directly from the library
+import type { Connector } from '@starknet-react/core';
+
 export function Navbar() {
   const { address, isConnected } = useAccount()
   const { connect, connectors } = useConnect()
@@ -84,7 +87,7 @@ export function Navbar() {
   }
 
   // Handle successful wallet connection
-  const handleConnect = (connector: any) => {
+  const handleConnect = (connector: Connector) => {
     connect({ connector })
     setShowConnectors(false)
     toast.success(`🎉 Successfully connected with ${connector.id === 'argentX' ? 'Argent X' : 'Braavos'}!`, {

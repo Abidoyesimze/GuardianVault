@@ -1,5 +1,8 @@
 import { toast, ToastOptions } from 'react-toastify'
 
+// Type for error objects that can occur in promises
+type ToastError = Error | string | { message: string } | unknown
+
 // Default toast configuration
 const defaultToastOptions: ToastOptions = {
   position: "top-right",
@@ -122,18 +125,22 @@ export const toastService = {
   },
 
   // Promise-based toast for async operations
-    promise: <T,>(
+  promise: <T,>(
     promise: Promise<T>,
     messages: {
       pending: string
       success: string | { render: (data: T) => string }
-      error: string | { render: (error: any) => string }
+      error: string | { render: (error: ToastError) => string }
     }
   ) => {
     const formattedMessages = {
       pending: messages.pending,
-      success: typeof messages.success === 'string' ? messages.success : { render: messages.success.render },
-      error: typeof messages.error === 'string' ? messages.error : { render: messages.error.render },
+      success: typeof messages.success === 'string' 
+        ? messages.success 
+        : { render: (data: unknown) => (messages.success as { render: (data: T) => string }).render(data as T) },
+      error: typeof messages.error === 'string' 
+        ? messages.error 
+        : { render: (error: unknown) => (messages.error as { render: (error: ToastError) => string }).render(error as ToastError) },
     }
     return toast.promise(promise, formattedMessages, {
       ...defaultToastOptions,
@@ -141,7 +148,7 @@ export const toastService = {
   },
 }
 
-// React hook for easy access
+
 export function useToast() {
   return toastService
 }

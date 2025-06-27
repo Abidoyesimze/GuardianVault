@@ -51,6 +51,8 @@ type DashboardStats = {
   guardiansHelped: number
 }
 
+type TabType = 'overview' | 'guardians' | 'recovery' | 'history'
+
 export default function DashboardPage() {
   const { address, isConnected } = useAccount()
   const [guardians, setGuardians] = useState<Guardian[]>([])
@@ -64,7 +66,7 @@ export default function DashboardPage() {
   
   const [isLoading, setIsLoading] = useState(false)
   const [showAddressDetails, setShowAddressDetails] = useState(false)
-  const [activeTab, setActiveTab] = useState<'overview' | 'guardians' | 'recovery' | 'history'>('overview')
+  const [activeTab, setActiveTab] = useState<TabType>('overview')
   const [threshold, setThreshold] = useState(2)
   const [copied, setCopied] = useState(false)
 
@@ -248,8 +250,8 @@ export default function DashboardPage() {
             <span className="text-success-400 text-sm font-medium">Protected</span>
             <button
               onClick={copyAddress}
-              className="btn-ghost p-2"
-              title="Copy address"
+              className={`btn-ghost p-2 ${copied ? 'text-success-400' : ''}`}
+              title={copied ? 'Copied!' : 'Copy address'}
             >
               <Copy className="h-4 w-4" />
             </button>
@@ -305,7 +307,7 @@ export default function DashboardPage() {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => setActiveTab(tab.id as TabType)}
                 className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
                   activeTab === tab.id
                     ? 'bg-primary-600 text-white shadow-glow'
@@ -498,7 +500,7 @@ export default function DashboardPage() {
                 <Shield className="h-16 w-16 text-neutral-600 mx-auto" />
                 <h4 className="text-xl font-bold text-white">No Recovery Requests</h4>
                 <p className="text-neutral-400">
-                  You don't have any active recovery requests at the moment.
+                  You don&apos;t have any active recovery requests at the moment.
                 </p>
               </div>
             ) : (
