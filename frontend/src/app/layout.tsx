@@ -1,14 +1,18 @@
 import './globals.css'
-import { Inter } from 'next/font/google'
 import { StarknetProvider } from '@/components/StarknetProvider'
 import { Navbar } from '@/components/Navbar'
+import { NetworkIndicator } from '@/components/NetworkIndicator'
+import { ContractStatus } from '@/components/ContractStatus'
+import { ToastContainer } from 'react-toastify'
+import 'react-toastify/dist/ReactToastify.css'
 import type { Metadata, Viewport } from 'next'
 
-const inter = Inter({ 
-  subsets: ['latin'],
-  variable: '--font-inter',
+// Use system font instead of Google Fonts to avoid network issues
+const systemFont = {
+  fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+  variable: '--font-system',
   display: 'swap',
-})
+}
 
 export const metadata: Metadata = {
   title: {
@@ -78,7 +82,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={systemFont.variable}>
       <body className="antialiased">
         <StarknetProvider>
           {/* Background */}
@@ -95,7 +99,23 @@ export default function RootLayout({
                 {children}
               </div>
             </main>
+            <NetworkIndicator />
+            <ContractStatus />
           </div>
+          
+          {/* Toast Container */}
+          <ToastContainer
+            position="top-right"
+            autoClose={5000}
+            hideProgressBar={false}
+            newestOnTop={false}
+            closeOnClick
+            rtl={false}
+            pauseOnFocusLoss
+            draggable
+            pauseOnHover
+            theme="dark"
+          />
         </StarknetProvider>
       </body>
     </html>

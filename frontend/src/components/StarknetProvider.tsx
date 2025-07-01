@@ -1,11 +1,11 @@
 'use client'
 
 import { StarknetConfig, publicProvider } from '@starknet-react/core'
-import { mainnet, sepolia } from '@starknet-react/chains'
+import { sepolia } from '@starknet-react/chains'
 import { InjectedConnector } from '@starknet-react/core'
 
 export function StarknetProvider({ children }: { children: React.ReactNode }) {
-  const chains = [mainnet, sepolia]
+  const chains = [sepolia]
   const providers = publicProvider()
   
   const connectors = [

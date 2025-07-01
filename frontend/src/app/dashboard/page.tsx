@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useAccount } from '@starknet-react/core'
 import { 
   Shield, 
@@ -20,8 +20,19 @@ import {
   TrendingUp,
   Wallet,
   Eye,
-  EyeOff
+  EyeOff,
+  XCircle
 } from 'lucide-react'
+import { 
+  useRecoveryRequest, 
+  useGuardianRoot, 
+  useThreshold, 
+  useApprovalCount,
+  useIsRecoveryApproved,
+  useInitiateRecovery,
+  useFinalizeRecovery
+} from '../../../lib/hooks/useRecoveryContract'
+import { RecoveryStatus } from '../../../types/recovery'
 
 type Guardian = {
   id: string
@@ -32,7 +43,7 @@ type Guardian = {
   lastActive?: Date
 }
 
-type RecoveryRequest = {
+type DashboardRecoveryRequest = {
   id: string
   type: 'incoming' | 'outgoing'
   status: 'pending' | 'approved' | 'rejected' | 'completed' | 'expired'
@@ -55,8 +66,9 @@ type TabType = 'overview' | 'guardians' | 'recovery' | 'history'
 
 export default function DashboardPage() {
   const { address, isConnected } = useAccount()
+  
   const [guardians, setGuardians] = useState<Guardian[]>([])
-  const [recoveryRequests, setRecoveryRequests] = useState<RecoveryRequest[]>([])
+  const [recoveryRequests, setRecoveryRequests] = useState<DashboardRecoveryRequest[]>([])
   const [stats, setStats] = useState<DashboardStats>({
     totalGuardians: 0,
     activeRecoveries: 0,
@@ -69,20 +81,45 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<TabType>('overview')
   const [threshold, setThreshold] = useState(2)
   const [copied, setCopied] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (isConnected) {
-      loadDashboardData()
+  // Contract hooks - only call when wallet is connected and address is available
+  const walletAddress = isConnected && address ? address : undefined
+  
+  const { recoveryRequest, isLoading: recoveryLoading, error: recoveryError } = useRecoveryRequest(walletAddress)
+  const { isLoading: guardianRootLoading, error: guardianRootError } = useGuardianRoot(walletAddress)
+  const { threshold: contractThreshold, isLoading: thresholdLoading, error: thresholdError } = useThreshold(walletAddress)
+  const { error: approvalError } = useApprovalCount(walletAddress)
+  const { error: approvedError } = useIsRecoveryApproved(walletAddress)
+
+  // Action hooks
+  const { initiateRecovery, isPending: initiatePending, error: initiateError } = useInitiateRecovery()
+  const { finalizeRecovery, isPending: finalizePending, error: finalizeError } = useFinalizeRecovery()
+
+  const mapRecoveryStatus = (status: RecoveryStatus): 'pending' | 'approved' | 'rejected' | 'completed' | 'expired' => {
+    switch (status) {
+      case RecoveryStatus.Pending:
+        return 'pending'
+      case RecoveryStatus.Approved:
+        return 'approved'
+      case RecoveryStatus.Completed:
+        return 'completed'
+      case RecoveryStatus.Expired:
+        return 'expired'
+      default:
+        return 'pending'
     }
-  }, [isConnected])
+  }
 
-  const loadDashboardData = async () => {
+  const loadDashboardData = useCallback(async () => {
+    if (!isConnected || !address) {
+      return
+    }
+
     setIsLoading(true)
     try {
-      // TODO: Load data from smart contracts
-      await new Promise(resolve => setTimeout(resolve, 1500))
-      
-      // Mock data
+      // TODO: Load real guardian data from contract events or off-chain storage
+      // For now, using mock data for guardians since we need to parse merkle tree
       const mockGuardians: Guardian[] = [
         {
           id: '1',
@@ -110,42 +147,79 @@ export default function DashboardPage() {
         }
       ]
 
-      const mockRecoveryRequests: RecoveryRequest[] = [
-        {
+      // Convert contract recovery request to dashboard format
+      const dashboardRecoveryRequests: DashboardRecoveryRequest[] = []
+      
+      if (recoveryRequest && recoveryRequest.status !== RecoveryStatus.None) {
+        const status = mapRecoveryStatus(recoveryRequest.status)
+        dashboardRecoveryRequests.push({
           id: '1',
           type: 'outgoing',
-          status: 'pending',
-          targetWallet: '0xnewwallet...',
-          createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
-          currentApprovals: 1,
-          requiredApprovals: 2
-        },
-        {
-          id: '2',
-          type: 'incoming',
-          status: 'completed',
-          requesterName: 'Sarah Chen',
-          createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-          completedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
-          currentApprovals: 2,
-          requiredApprovals: 2
-        }
-      ]
+          status,
+          targetWallet: recoveryRequest.new_wallet,
+          createdAt: new Date(recoveryRequest.timestamp * 1000),
+          completedAt: status === 'completed' ? new Date(recoveryRequest.timestamp * 1000 + 24 * 60 * 60 * 1000) : undefined,
+          currentApprovals: recoveryRequest.approvals,
+          requiredApprovals: contractThreshold || 2
+        })
+      }
 
       setGuardians(mockGuardians)
-      setRecoveryRequests(mockRecoveryRequests)
+      setRecoveryRequests(dashboardRecoveryRequests)
       setStats({
         totalGuardians: mockGuardians.length,
-        activeRecoveries: mockRecoveryRequests.filter(r => r.status === 'pending').length,
-        completedRecoveries: mockRecoveryRequests.filter(r => r.status === 'completed').length,
-        guardiansHelped: 5
+        activeRecoveries: dashboardRecoveryRequests.filter(r => r.status === 'pending').length,
+        completedRecoveries: dashboardRecoveryRequests.filter(r => r.status === 'completed').length,
+        guardiansHelped: 5 // TODO: Get from contract events
       })
     } catch (error) {
       console.error('Failed to load dashboard data:', error)
+      setError('Failed to load dashboard data')
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [isConnected, address, recoveryRequest, contractThreshold])
+
+  useEffect(() => {
+    if (isConnected && address) {
+      loadDashboardData()
+    }
+  }, [isConnected, address, loadDashboardData])
+
+  // Update threshold from contract
+  useEffect(() => {
+    if (contractThreshold > 0) {
+      setThreshold(contractThreshold)
+    }
+  }, [contractThreshold])
+
+  // Handle errors
+  useEffect(() => {
+    if (!isConnected) {
+      setError(null)
+      return
+    }
+
+    const errors = [
+      recoveryError?.message,
+      guardianRootError?.message,
+      thresholdError?.message,
+      approvalError?.message,
+      approvedError?.message,
+      initiateError?.message,
+      finalizeError?.message
+    ].filter(Boolean)
+
+    if (errors.length > 0) {
+      setError(errors[0] || 'An error occurred')
+    } else {
+      setError(null)
+    }
+  }, [
+    isConnected,
+    recoveryError, guardianRootError, thresholdError, approvalError, 
+    approvedError, initiateError, finalizeError
+  ])
 
   const copyAddress = async () => {
     if (address) {
@@ -177,6 +251,33 @@ export default function DashboardPage() {
     }
   }
 
+  const handleInitiateRecovery = async () => {
+    if (!address) return
+    
+    // TODO: Get new wallet address from user input
+    const newWallet = '0xnewwallet...' // This should come from a form
+    
+    const result = await initiateRecovery(address, newWallet)
+    if (result.success) {
+      // Refresh data
+      loadDashboardData()
+    } else {
+      setError(result.error || 'Failed to initiate recovery')
+    }
+  }
+
+  const handleFinalizeRecovery = async () => {
+    if (!address || !recoveryRequest) return
+    
+    const result = await finalizeRecovery(address)
+    if (result.success) {
+      // Refresh data
+      loadDashboardData()
+    } else {
+      setError(result.error || 'Failed to finalize recovery')
+    }
+  }
+
   if (!isConnected) {
     return (
       <div className="max-w-2xl mx-auto animate-scale-in">
@@ -198,6 +299,22 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
+      {/* Error Banner */}
+      {error && (
+        <div className="card p-4 bg-error-500/10 border border-error-500/20 animate-slide-down">
+          <div className="flex items-center space-x-3">
+            <XCircle className="h-5 w-5 text-error-400" />
+            <p className="text-error-400 flex-1">{error}</p>
+            <button 
+              onClick={() => setError(null)}
+              className="text-error-400 hover:text-error-300"
+            >
+              <XCircle className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0 animate-fade-in">
         <div>
@@ -208,7 +325,7 @@ export default function DashboardPage() {
           <button
             onClick={loadDashboardData}
             className="btn-ghost flex items-center space-x-2"
-            disabled={isLoading}
+            disabled={isLoading || recoveryLoading || guardianRootLoading || thresholdLoading}
           >
             <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
@@ -367,13 +484,19 @@ export default function DashboardPage() {
               </h3>
               
               <div className="space-y-3">
-                <div className="flex items-center space-x-3 p-3 bg-neutral-900/50 rounded-lg">
-                  <CheckCircle className="h-4 w-4 text-success-500" />
-                  <div className="flex-1">
-                    <p className="text-white text-sm">Helped Sarah Chen recover wallet</p>
-                    <p className="text-neutral-400 text-xs">2 days ago</p>
+                {recoveryRequest && recoveryRequest.status !== RecoveryStatus.None && (
+                  <div className="flex items-center space-x-3 p-3 bg-neutral-900/50 rounded-lg">
+                    <Shield className="h-4 w-4 text-primary-500" />
+                    <div className="flex-1">
+                      <p className="text-white text-sm">
+                        Recovery request {mapRecoveryStatus(recoveryRequest.status)}
+                      </p>
+                      <p className="text-neutral-400 text-xs">
+                        {new Date(recoveryRequest.timestamp * 1000).toLocaleDateString()}
+                      </p>
+                    </div>
                   </div>
-                </div>
+                )}
                 
                 <div className="flex items-center space-x-3 p-3 bg-neutral-900/50 rounded-lg">
                   <Users className="h-4 w-4 text-primary-500" />
@@ -490,8 +613,12 @@ export default function DashboardPage() {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="text-2xl font-bold text-white">Recovery Requests</h3>
-              <button className="btn-primary">
-                Initiate Recovery
+              <button 
+                className="btn-primary"
+                onClick={handleInitiateRecovery}
+                disabled={initiatePending}
+              >
+                {initiatePending ? 'Initiating...' : 'Initiate Recovery'}
               </button>
             </div>
 
@@ -550,6 +677,17 @@ export default function DashboardPage() {
                           style={{ width: `${(request.currentApprovals / request.requiredApprovals) * 100}%` }}
                         ></div>
                       </div>
+                      
+                      {/* Show finalize button if recovery is approved */}
+                      {request.status === 'approved' && (
+                        <button 
+                          className="btn-success w-full mt-4"
+                          onClick={handleFinalizeRecovery}
+                          disabled={finalizePending}
+                        >
+                          {finalizePending ? 'Finalizing...' : 'Finalize Recovery'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}

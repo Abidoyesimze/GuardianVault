@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useAccount } from '@starknet-react/core'
+import { toast } from 'react-toastify'
 import { 
   Search, 
   Clock, 
@@ -14,6 +15,7 @@ import {
   ExternalLink,
   Wallet
 } from 'lucide-react'
+import { useInitiateRecovery, useRecoveryRequest, useApprovalCount } from '../../../lib/hooks/useRecoveryContract'
 
 type RecoveryStatus = 'not-started' | 'searching' | 'found' | 'initiated' | 'pending' | 'approved' | 'failed'
 
@@ -45,11 +47,34 @@ export default function RecoveryPage() {
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
+  // Contract hooks
+  const { initiateRecovery, isPending: isInitiating } = useInitiateRecovery()
+  const { recoveryRequest } = useRecoveryRequest(oldWalletAddress || undefined)
+  const { approvalCount } = useApprovalCount(oldWalletAddress || undefined)
+
   useEffect(() => {
     if (isConnected && currentStep === 'connect') {
       setCurrentStep('search')
     }
   }, [isConnected, currentStep])
+
+  // Monitor recovery progress
+  useEffect(() => {
+    if (recovery && recovery.status === 'pending' && approvalCount !== undefined) {
+      const newRecovery = { ...recovery, currentApprovals: approvalCount }
+      
+      if (approvalCount >= recovery.requiredApprovals) {
+        newRecovery.status = 'approved'
+        setCurrentStep('complete')
+        toast.success('🎉 Recovery approved! Your wallet has been successfully recovered.', {
+          position: "top-right",
+          autoClose: 5000,
+        })
+      }
+      
+      setRecovery(newRecovery)
+    }
+  }, [approvalCount, recovery])
 
   const validateStarkNetAddress = (addr: string): boolean => {
     return addr.startsWith('0x') && addr.length >= 60 && addr.length <= 66
@@ -60,55 +85,96 @@ export default function RecoveryPage() {
 
     setIsLoading(true)
     setError(null)
+    
     try {
-      // TODO: Call smart contract to check for existing guardian setup
-      await new Promise(resolve => setTimeout(resolve, 2000)) // Simulate contract call
-      
-      // Mock finding a guardian setup
-      const mockRecovery: Recovery = {
-        id: '1',
-        oldWalletAddress,
-        newWalletAddress: address!,
-        requiredApprovals: 2,
-        currentApprovals: 0,
-        status: 'found',
-        createdAt: new Date(),
-        guardians: [
-          { name: 'Alice', address: '0x123...456', hasApproved: false },
-          { name: 'Bob', address: '0x789...abc', hasApproved: false },
-          { name: 'Charlie', address: '0xdef...789', hasApproved: false },
-        ]
+      // Check if there's an existing recovery request
+      if (recoveryRequest) {
+        const mockRecovery: Recovery = {
+          id: '1',
+          oldWalletAddress,
+          newWalletAddress: address!,
+          requiredApprovals: 2,
+          currentApprovals: approvalCount || 0,
+          status: recoveryRequest.status === 1 ? 'pending' : 'found',
+          createdAt: new Date(recoveryRequest.timestamp * 1000),
+          guardians: [
+            { name: 'Alice', address: '0x123...456', hasApproved: false },
+            { name: 'Bob', address: '0x789...abc', hasApproved: false },
+            { name: 'Charlie', address: '0xdef...789', hasApproved: false },
+          ]
+        }
+        
+        setRecovery(mockRecovery)
+        setCurrentStep(recoveryRequest.status === 1 ? 'progress' : 'initiate')
+        toast.success('✅ Recovery setup found!', {
+          position: "top-right",
+          autoClose: 3000,
+        })
+      } else {
+        // Simulate finding a guardian setup
+        const mockRecovery: Recovery = {
+          id: '1',
+          oldWalletAddress,
+          newWalletAddress: address!,
+          requiredApprovals: 2,
+          currentApprovals: 0,
+          status: 'found',
+          createdAt: new Date(),
+          guardians: [
+            { name: 'Alice', address: '0x123...456', hasApproved: false },
+            { name: 'Bob', address: '0x789...abc', hasApproved: false },
+            { name: 'Charlie', address: '0xdef...789', hasApproved: false },
+          ]
+        }
+        
+        setRecovery(mockRecovery)
+        setCurrentStep('initiate')
+        toast.success('✅ Recovery setup found!', {
+          position: "top-right",
+          autoClose: 3000,
+        })
       }
-      
-      setRecovery(mockRecovery)
-      setCurrentStep('initiate')
     } catch (error) {
-      setError('Failed to find recovery setup. Please check the wallet address.')
+      const errorMessage = 'Failed to find recovery setup. Please check the wallet address.'
+      setError(errorMessage)
+      toast.error(errorMessage, {
+        position: "top-right",
+        autoClose: 5000,
+      })
       console.error('Search failed:', error)
     } finally {
       setIsLoading(false)
     }
   }
 
-  const initiateRecovery = async () => {
-    if (!recovery) return
+  const handleInitiateRecovery = async () => {
+    if (!recovery || !oldWalletAddress || !address) return
 
-    setIsLoading(true)
     try {
-      // TODO: Call smart contract to initiate recovery
-      await new Promise(resolve => setTimeout(resolve, 2000))
+      const result = await initiateRecovery(oldWalletAddress, address)
       
-      setRecovery({
-        ...recovery,
-        status: 'pending',
-        estimatedCompletion: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours from now
-      })
-      setCurrentStep('progress')
+      if (result.success) {
+        setRecovery({
+          ...recovery,
+          status: 'pending',
+          estimatedCompletion: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours from now
+        })
+        setCurrentStep('progress')
+        toast.success('🚀 Recovery initiated successfully! Waiting for guardian approvals.', {
+          position: "top-right",
+          autoClose: 5000,
+        })
+      } else {
+        throw new Error(result.error || 'Failed to initiate recovery')
+      }
     } catch (error) {
-      setError('Failed to initiate recovery. Please try again.')
+      const errorMessage = 'Failed to initiate recovery. Please try again.'
+      setError(errorMessage)
+      toast.error(errorMessage, {
+        position: "top-right",
+        autoClose: 5000,
+      })
       console.error('Recovery initiation failed:', error)
-    } finally {
-      setIsLoading(false)
     }
   }
 
@@ -116,7 +182,21 @@ export default function RecoveryPage() {
     const recoveryLink = `${window.location.origin}/guardian?recovery=${recovery?.id}`
     await navigator.clipboard.writeText(recoveryLink)
     setCopied(true)
+    toast.success('📋 Recovery link copied to clipboard!', {
+      position: "top-right",
+      autoClose: 2000,
+    })
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const refreshStatus = () => {
+    if (recovery && oldWalletAddress) {
+      toast.info('🔄 Refreshing recovery status...', {
+        position: "top-right",
+        autoClose: 2000,
+      })
+      // The hooks will automatically refetch the data
+    }
   }
 
   const getStatusIcon = (status: RecoveryStatus) => {
@@ -290,11 +370,11 @@ export default function RecoveryPage() {
             </div>
 
             <button
-              onClick={initiateRecovery}
-              disabled={isLoading}
+              onClick={handleInitiateRecovery}
+              disabled={isInitiating}
               className="btn-primary w-full text-lg py-4"
             >
-              {isLoading ? (
+              {isInitiating ? (
                 <>
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
                   Initiating Recovery...
@@ -443,9 +523,37 @@ export default function RecoveryPage() {
 
           {/* Refresh Button */}
           <div className="text-center">
-            <button className="btn-ghost flex items-center space-x-2 mx-auto">
+            <button 
+              onClick={refreshStatus}
+              className="btn-ghost flex items-center space-x-2 mx-auto"
+            >
               <RefreshCw className="h-4 w-4" />
               <span>Refresh Status</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Complete Step */}
+      {currentStep === 'complete' && recovery && (
+        <div className="max-w-2xl mx-auto text-center space-y-8 animate-scale-in">
+          <div className="card p-12 space-y-6">
+            <CheckCircle className="h-20 w-20 text-success-500 mx-auto" />
+            <h2 className="text-3xl font-bold text-white">Recovery Complete!</h2>
+            <p className="text-neutral-300 text-lg">
+              Your wallet has been successfully recovered. You now have full access to your funds.
+            </p>
+            <div className="space-y-4">
+              <div className="bg-success-500/10 border border-success-500/20 rounded-lg p-4">
+                <p className="text-success-400 font-medium">Old Wallet: {recovery.oldWalletAddress.slice(0, 10)}...{recovery.oldWalletAddress.slice(-10)}</p>
+                <p className="text-success-400 font-medium">New Wallet: {recovery.newWalletAddress.slice(0, 10)}...{recovery.newWalletAddress.slice(-10)}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => window.location.href = '/dashboard'}
+              className="btn-primary w-full text-lg py-4"
+            >
+              Go to Dashboard
             </button>
           </div>
         </div>

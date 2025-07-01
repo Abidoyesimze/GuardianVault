@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useContract, useAccount } from '@starknet-react/core';
@@ -25,6 +24,12 @@ export function useRecoveryContract() {
   const { contract } = useContract({
     abi: RECOVERY_MANAGER_ABI,
     address: RECOVERY_MANAGER_ADDRESS,
+  });
+
+  // Debug logging
+  console.log('useRecoveryContract:', {
+    address: RECOVERY_MANAGER_ADDRESS,
+    contract: !!contract
   });
 
   return contract;
@@ -233,15 +238,21 @@ function useContractRead(methodName: string, args?: string[]) {
   const memoizedArgs = useMemo(() => args, [args?.join(',')]);
   
   const fetchData = useCallback(async () => {
-    if (!contract || !methodName) return;
+    if (!contract || !methodName) {
+      return;
+    }
+    
+    // Don't call if args are undefined, null, empty array, or if any required argument is empty
+    if (!memoizedArgs || memoizedArgs.length === 0 || memoizedArgs.some(arg => !arg)) {
+      return;
+    }
     
     setIsLoading(true);
     setError(null);
     
     try {
-      
       const result = await ((contract as unknown) as { call: (method: string, args: string[]) => Promise<ContractCallResult> })
-        .call(methodName, memoizedArgs || []);
+        .call(methodName, memoizedArgs);
       setData(result);
     } catch (err) {
       const error = err as ContractError;
@@ -253,8 +264,10 @@ function useContractRead(methodName: string, args?: string[]) {
   }, [contract, methodName, memoizedArgs]);
 
   useEffect(() => {
-    if (memoizedArgs && memoizedArgs.some(arg => !arg)) return; // Don't call if any arg is undefined/empty
-    fetchData();
+    // Only call fetchData if we have valid arguments
+    if (memoizedArgs && memoizedArgs.length > 0 && !memoizedArgs.some(arg => !arg)) {
+      fetchData();
+    }
   }, [fetchData, memoizedArgs]);
 
   return { data, isLoading, error, refetch: fetchData };
