@@ -1,6 +1,6 @@
 # 🛡️ GuardianVault - Never Lose Your Crypto Again
 
-## 🎯 What is GuardianVault?
+##  What is GuardianVault?
 
 **GuardianVault is a social recovery system that lets your trusted friends and family help you recover your crypto wallet when you lose access.**
 
@@ -11,7 +11,7 @@ Instead of relying on a piece of paper (seed phrase) that can be lost, stolen, o
 
 ---
 
-## 🌟 Our Vision: Making Crypto Safe for Everyone
+## Our Vision: Making Crypto Safe for Everyone
 
 ### **The Mission**
 We believe **everyone deserves access to financial freedom** - not just tech experts who can safely manage seed phrases. GuardianVault makes crypto as easy to recover as your email or social media accounts.
@@ -29,36 +29,36 @@ Today, crypto is like the early internet - powerful but scary for regular people
 
 ---
 
-## 🎯 Who Is GuardianVault For?
+## Who Is GuardianVault For?
 
-### **👨‍👩‍👧‍👦 Families**
+### ** Families**
 - Parents want to pass crypto to their kids safely
 - Couples want to share access without sharing keys
 - Families need inheritance planning for digital assets
 
-### **🏢 Small Business Owners**
+### ** Small Business Owners**
 - Need secure access to business crypto wallets
 - Want multiple employees to help with recovery
 - Require backup plans for critical financial access
 
-### **👵 Crypto Newcomers**
+### ** Crypto Newcomers**
 - Intimidated by seed phrase management
 - Want the security of crypto without the complexity
 - Need a safety net while learning
 
-### **🚀 Crypto Veterans**
+### ** Crypto Veterans**
 - Want to onboard family members safely
 - Need better security than single seed phrases
 - Looking for decentralized alternatives to centralized exchanges
 
-### **💼 Anyone Who Values Security**
+### ** Anyone Who Values Security**
 - Understands that backup plans are essential
 - Wants multiple layers of protection
 - Prefers social verification over complex technical solutions
 
 ---
 
-## 💔 The Problem We Solve
+## The Problem We Solve
 
 ### **Everyone's Crypto Nightmare**
 - **Lost seed phrase?** → All your crypto is gone forever
@@ -79,15 +79,15 @@ Today, crypto is like the early internet - powerful but scary for regular people
 
 ---
 
-## ✨ How GuardianVault Changes Everything
+## How GuardianVault Changes Everything
 
 ### **Your Personal Recovery Network**
 GuardianVault lets you create a **personal recovery network** of people you trust:
 
-1. **👥 Choose Your Guardians** - Pick 3-5 trusted friends/family
-2. **🔐 Set Your Rules** - Decide how many need to approve (e.g., 2 out of 3)
-3. **🛡️ Stay Protected** - If you lose access, they can help you recover
-4. **🔄 Get Back Control** - Your crypto transfers to your new wallet
+1. ** Choose Your Guardians** - Pick 3-5 trusted friends/family
+2. ** Set Your Rules** - Decide how many need to approve (e.g., 2 out of 3)
+3. ** Stay Protected** - If you lose access, they can help you recover
+4. ** Get Back Control** - Your crypto transfers to your new wallet
 
 ### **The Magic: Social + Cryptographic Security**
 - **Social Layer**: Your guardians verify it's really you
@@ -97,7 +97,7 @@ GuardianVault lets you create a **personal recovery network** of people you trus
 
 ---
 
-## 🚀 Why GuardianVault Matters
+## Why GuardianVault Matters
 
 ### **For Regular People**
 - **No more sleepless nights** worrying about lost seed phrases
@@ -118,14 +118,14 @@ GuardianVault makes crypto **accessible to everyone** by removing the biggest ba
 
 ---
 
-## 💡 How Does Recovery Actually Work?
+##  How Does Recovery Actually Work?
 
-### ❌ What We DON'T Do
+###  What We DON'T Do
 - **We don't recover your original private keys** (they're gone forever)
 - **We don't give you back your seed phrase** (impossible to recover)
 - **We don't store your keys anywhere** (completely decentralized)
 
-### ✅ What We DO Do
+### What We DO Do
 **We transfer ownership of your assets to a NEW wallet** that you control.
 
 Think of it like this:
@@ -138,7 +138,7 @@ You don't get your old wallet back - you get a **new wallet with all your old as
 
 ---
 
-## 🔄 The Recovery Process Explained
+##  The Recovery Process Explained
 
 ### **Step 1: Setup (One Time)**
 When you first use GuardianVault, you:
@@ -147,7 +147,7 @@ When you first use GuardianVault, you:
 - Their wallet addresses are stored on-chain (but privately)
 
 ### **Step 2: The Crisis**
-😱 **You lose access to your wallet!**
+ **You lose access to your wallet!**
 - Phone stolen/broken
 - Forgot password
 - Lost seed phrase
@@ -173,7 +173,7 @@ When you first use GuardianVault, you:
 
 ---
 
-## 🛡️ Security & Privacy
+##  Security & Privacy
 
 ### **Guardian Privacy**
 - Guardian identities are hidden using **Merkle Tree cryptography**
@@ -194,24 +194,23 @@ When you first use GuardianVault, you:
 
 ---
 
-## 🎯 Key Benefits
+##  Key Benefits
 
 | Traditional Recovery | GuardianVault |
 |---------------------|---------------|
-| 📝 Write down seed phrase | 👥 Choose trusted guardians |
-| 🔒 Store in safe/bank | 📱 Guardians use their phones |
-| 😰 If lost = funds gone | 🔄 If lost = guardians help recover |
-| 🏢 Centralized services | 🌐 Fully decentralized |
-| 💰 Expensive hardware | 🆓 Free and open-source |
+|  Write down seed phrase | Choose trusted guardians |
+|  Store in safe/bank |  Guardians use their phones |
+|  If lost = funds gone |  If lost = guardians help recover |
+|  Centralized services |  Fully decentralized |
+|  Expensive hardware |  Free and open-source |
 
 ---
 
-## 🌟 Why This Matters
+##  Why This Matters
 
 ### **For Regular Users**
 - **No more paper backup anxiety** - Your guardians are your backup
 - **Family-friendly** - Your spouse/kids can help you recover
-- **Mobile-first** - Works with any wallet app
 - **Peace of mind** - Know you can always recover access
 
 ### **For Crypto Enthusiasts**
@@ -222,10 +221,10 @@ When you first use GuardianVault, you:
 
 ---
 
-## 🚀 Getting Started
+##  Getting Started
 
 ### **Step 1: Connect Your Wallet**
-- Visit [guardianvault.app](https://guardianvault.app)
+- Visit [guardianvault.app](guardian-vault-phi.vercel.app)
 - Connect your StarkNet wallet (ArgentX or Braavos)
 - Make sure you're on Sepolia testnet
 
