@@ -1,11 +1,13 @@
 'use client';
 
 import { useContract, useAccount } from '@starknet-react/core';
-import { RECOVERY_MANAGER_ABI, RECOVERY_MANAGER_ADDRESS } from '../../lib/contracts/recovery-manager';
+import { RECOVERY_MANAGER_ABI, RECOVERY_MANAGER_ADDRESS } from '../contracts/recovery-manager';
 import { RecoveryRequest, RecoveryStatus, TransactionResult } from '../../types/recovery';
+import { parseCairoError } from '../utils/errors';
 import { useState, useCallback, useEffect, useMemo } from 'react';
 
 
+// Type definitions for contract responses
 interface ContractError {
   message: string;
   code?: string | number;
@@ -26,12 +28,6 @@ export function useRecoveryContract() {
     address: RECOVERY_MANAGER_ADDRESS,
   });
 
-  // Debug logging
-  console.log('useRecoveryContract:', {
-    address: RECOVERY_MANAGER_ADDRESS,
-    contract: !!contract
-  });
-
   return contract;
 }
 
@@ -44,13 +40,39 @@ export function useSetupGuardians() {
   const [data, setData] = useState<ContractInvokeResult | null>(null);
 
   const setupGuardians = useCallback(async (merkleRoot: string, threshold: number): Promise<TransactionResult> => {
+    console.log('setupGuardians called with:', { merkleRoot, threshold });
+    console.log('Contract available:', !!contract);
+    console.log('Account available:', !!account);
+    console.log(account)
+    
     setIsPending(true);
     setError(null);
     
     try {
-      if (!contract || !account) throw new Error('Contract or account not available');
+      if (!contract) {
+        throw new Error('Contract not available');
+      }
       
-      const result = await contract.invoke('setup_guardians', [merkleRoot, threshold]) as ContractInvokeResult;
+      
+      if (!account) {
+        throw new Error('Account not available - please ensure wallet is connected');
+      }
+      console.log('Account address:', account);
+      
+      console.log('Executing setup_guardians with:', {
+        contractAddress: RECOVERY_MANAGER_ADDRESS,
+        merkleRoot,
+        threshold
+      });
+      
+      // Use account.execute for reliable transaction execution
+      const result = await account.execute({
+        contractAddress: RECOVERY_MANAGER_ADDRESS,
+        entrypoint: 'setup_guardians',
+        calldata: ["000", "2"]
+      });
+      
+      console.log('Setup guardians result:', result);
       
       setData(result);
       setIsPending(false);
@@ -60,14 +82,15 @@ export function useSetupGuardians() {
         hash: result.transaction_hash 
       };
     } catch (err) {
+      console.error('Setup guardians error:', err);
       const error = err as ContractError;
-      console.error('Setup guardians error:', error);
-      setError(error);
+      const userFriendlyError = parseCairoError(error);
+      setError({ message: userFriendlyError });
       setIsPending(false);
       
       return { 
         success: false, 
-        error: error.message || 'Failed to setup guardians' 
+        error: userFriendlyError
       };
     }
   }, [contract, account]);
@@ -95,7 +118,12 @@ export function useInitiateRecovery() {
     try {
       if (!contract || !account) throw new Error('Contract or account not available');
       
-      const result = await contract.invoke('initiate_recovery', [oldWallet, newWallet]) as ContractInvokeResult;
+      // Use account.execute for consistency
+      const result = await account.execute({
+        contractAddress: RECOVERY_MANAGER_ADDRESS,
+        entrypoint: 'initiate_recovery',
+        calldata: [oldWallet, newWallet]
+      });
       
       setData(result);
       setIsPending(false);
@@ -107,12 +135,13 @@ export function useInitiateRecovery() {
     } catch (err) {
       const error = err as ContractError;
       console.error('Initiate recovery error:', error);
-      setError(error);
+      const userFriendlyError = parseCairoError(error);
+      setError({ message: userFriendlyError });
       setIsPending(false);
       
       return { 
         success: false, 
-        error: error.message || 'Failed to initiate recovery' 
+        error: userFriendlyError
       };
     }
   }, [contract, account]);
@@ -146,13 +175,19 @@ export function useApproveRecovery() {
     try {
       if (!contract || !account) throw new Error('Contract or account not available');
       
-      const result = await contract.invoke('approve_recovery', [
-        oldWallet,
-        guardianAddress,
-        signatureR,
-        signatureS,
-        merkleProof
-      ]) as ContractInvokeResult;
+      // Use account.execute and format calldata properly for array
+      const result = await account.execute({
+        contractAddress: RECOVERY_MANAGER_ADDRESS,
+        entrypoint: 'approve_recovery',
+        calldata: [
+          oldWallet,
+          guardianAddress,
+          signatureR,
+          signatureS,
+          merkleProof.length.toString(), // Array length first
+          ...merkleProof // Then array elements
+        ]
+      });
       
       setData(result);
       setIsPending(false);
@@ -164,12 +199,13 @@ export function useApproveRecovery() {
     } catch (err) {
       const error = err as ContractError;
       console.error('Approve recovery error:', error);
-      setError(error);
+      const userFriendlyError = parseCairoError(error);
+      setError({ message: userFriendlyError });
       setIsPending(false);
       
       return { 
         success: false, 
-        error: error.message || 'Failed to approve recovery' 
+        error: userFriendlyError
       };
     }
   }, [contract, account]);
@@ -197,7 +233,12 @@ export function useFinalizeRecovery() {
     try {
       if (!contract || !account) throw new Error('Contract or account not available');
       
-      const result = await contract.invoke('finalize_recovery', [oldWallet]) as ContractInvokeResult;
+      // Use account.execute for consistency
+      const result = await account.execute({
+        contractAddress: RECOVERY_MANAGER_ADDRESS,
+        entrypoint: 'finalize_recovery',
+        calldata: [oldWallet]
+      });
       
       setData(result);
       setIsPending(false);
@@ -209,12 +250,13 @@ export function useFinalizeRecovery() {
     } catch (err) {
       const error = err as ContractError;
       console.error('Finalize recovery error:', error);
-      setError(error);
+      const userFriendlyError = parseCairoError(error);
+      setError({ message: userFriendlyError });
       setIsPending(false);
       
       return { 
         success: false, 
-        error: error.message || 'Failed to finalize recovery' 
+        error: userFriendlyError
       };
     }
   }, [contract, account]);
@@ -235,36 +277,32 @@ function useContractRead(methodName: string, args?: string[]) {
   const [error, setError] = useState<ContractError | null>(null);
 
   // Memoize args to prevent unnecessary re-renders
-  const memoizedArgs = useMemo(() => args, [args?.join(',')]);
+  const memoizedArgs = useMemo(() => {
+    if (!args || args.length === 0) return [];
+    return args.filter(arg => arg !== undefined && arg !== null);
+  }, [args]);
   
   const fetchData = useCallback(async () => {
-    if (!contract || !methodName) {
-      return;
-    }
-    
-    // Don't call if args are undefined, null, empty array, or if any required argument is empty
-    if (!memoizedArgs || memoizedArgs.length === 0 || memoizedArgs.some(arg => !arg)) {
-      return;
-    }
+    if (!contract || !memoizedArgs || memoizedArgs.length === 0) return;
     
     setIsLoading(true);
     setError(null);
     
     try {
-      const result = await ((contract as unknown) as { call: (method: string, args: string[]) => Promise<ContractCallResult> })
-        .call(methodName, memoizedArgs);
+      // Use the contract's call method directly with proper typing
+      const result = await (contract as unknown as { call: (method: string, args: string[]) => Promise<ContractCallResult> }).call(methodName, memoizedArgs);
       setData(result);
     } catch (err) {
       const error = err as ContractError;
-      setError(error);
-      console.error(`Error calling ${methodName}:`, error);
+      const userFriendlyError = parseCairoError(error);
+      setError({ message: userFriendlyError });
+      console.error(`Error calling ${methodName}:`, userFriendlyError);
     } finally {
       setIsLoading(false);
     }
   }, [contract, methodName, memoizedArgs]);
 
   useEffect(() => {
-    // Only call fetchData if we have valid arguments
     if (memoizedArgs && memoizedArgs.length > 0 && !memoizedArgs.some(arg => !arg)) {
       fetchData();
     }
