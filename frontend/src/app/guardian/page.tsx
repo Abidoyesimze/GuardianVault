@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useState, useEffect, useCallback, Suspense, useRef } from 'react'
 import { useAccount } from '@starknet-react/core'
 import { useSearchParams } from 'next/navigation'
 import { Account } from 'starknet'
@@ -41,6 +41,10 @@ function GuardianPortalContent() {
   const [approvalReason, setApprovalReason] = useState('')
   const [isVerifyingGuardian, setIsVerifyingGuardian] = useState(false)
   const [guardianAddresses, setGuardianAddresses] = useState<string[]>([])
+  const [hasVerified, setHasVerified] = useState(false)
+  
+  // Use ref to prevent multiple verification attempts
+  const verificationAttempted = useRef(false)
 
   // Contract hooks
   const { recoveryRequest, isLoading: loadingRequest, error: requestError, refetch: refetchRequest } = useRecoveryRequest(walletToRecover || undefined)
@@ -48,7 +52,7 @@ function GuardianPortalContent() {
   const { threshold, isLoading: loadingThreshold } = useThreshold(walletToRecover || undefined)
   const { approveRecovery, isPending: isApproving, error: approvalError } = useApproveRecovery()
 
-  // Check if wallet parameter is valid
+  // Check if wallet parameter is valid - only run once
   useEffect(() => {
     if (!walletToRecover) {
       setCurrentStep('invalid-wallet')
@@ -66,7 +70,9 @@ function GuardianPortalContent() {
   // Check if connected user is a valid guardian
   const verifyGuardianAccess = useCallback(async () => {
     if (!address || !walletToRecover || !guardianRoot) return
-
+    if (verificationAttempted.current) return // Prevent multiple attempts
+    
+    verificationAttempted.current = true
     setIsVerifyingGuardian(true)
     setError(null)
 
@@ -83,6 +89,7 @@ function GuardianPortalContent() {
         if (!isAuthorizedGuardian) {
           setError('You are not authorized as a guardian for this wallet.')
           setCurrentStep('error')
+          setHasVerified(true)
           return
         }
       }
@@ -95,16 +102,25 @@ function GuardianPortalContent() {
       } else {
         setCurrentStep('no-requests')
       }
+      
+      setHasVerified(true)
 
     } catch {
       setError('Failed to verify guardian access. Please try again.')
       setCurrentStep('error')
+      setHasVerified(true)
     } finally {
       setIsVerifyingGuardian(false)
     }
   }, [address, walletToRecover, guardianRoot, recoveryRequest])
 
-  // Update step based on connection and data loading
+  // Reset verification when wallet changes
+  useEffect(() => {
+    verificationAttempted.current = false
+    setHasVerified(false)
+  }, [address, walletToRecover])
+
+  // Handle connection state changes
   useEffect(() => {
     if (currentStep === 'invalid-wallet') {
       return
@@ -112,12 +128,15 @@ function GuardianPortalContent() {
 
     if (!isConnected) {
       setCurrentStep('connect')
-    } else if (isConnected && address && walletToRecover) {
-      if (!loadingRoot && !loadingThreshold && !loadingRequest) {
+      setHasVerified(false)
+      verificationAttempted.current = false
+    } else if (isConnected && address && walletToRecover && currentStep === 'connect') {
+      // Only proceed to verification if we're currently on connect step
+      if (!loadingRoot && !loadingThreshold && !loadingRequest && !hasVerified) {
         verifyGuardianAccess()
       }
     }
-  }, [isConnected, address, walletToRecover, loadingRoot, loadingThreshold, loadingRequest, verifyGuardianAccess, currentStep])
+  }, [isConnected, address, walletToRecover, loadingRoot, loadingThreshold, loadingRequest, hasVerified, verifyGuardianAccess, currentStep])
 
   // Handle contract errors
   useEffect(() => {
@@ -276,6 +295,9 @@ function GuardianPortalContent() {
     }
   }
 
+  // Show loading while data is being fetched and we haven't verified yet
+  const isLoading = (loadingRequest || loadingRoot || loadingThreshold || isVerifyingGuardian) && !hasVerified
+
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       {/* Header */}
@@ -348,7 +370,7 @@ function GuardianPortalContent() {
       )}
 
       {/* Loading State */}
-      {isConnected && currentStep !== 'invalid-wallet' && (loadingRequest || loadingRoot || loadingThreshold || isVerifyingGuardian) && (
+      {isConnected && currentStep !== 'invalid-wallet' && isLoading && (
         <div className="text-center py-12">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>
           <p className="text-neutral-300">

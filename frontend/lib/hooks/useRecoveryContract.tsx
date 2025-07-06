@@ -72,7 +72,7 @@ export function useSetupGuardians() {
         threshold
       });
       
-      // Use the actual parameters instead of hardcoded values
+      
       const result = await account.execute({
         contractAddress: RECOVERY_MANAGER_ADDRESS,
         entrypoint: 'setup_guardians',
