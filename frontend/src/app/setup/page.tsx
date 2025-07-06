@@ -1,12 +1,12 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useAccount, useDeployAccount } from '@starknet-react/core'
+import { useAccount } from '@starknet-react/core'
 import { toast } from 'react-toastify'
 import { Plus, Trash2, Users, Shield, CheckCircle, ArrowRight, ArrowLeft, AlertCircle } from 'lucide-react'
 import { useSetupGuardians } from '../../../lib/hooks/useRecoveryContract'
 import { generateMerkleRoot } from '../../../lib/utils/merkle'
-
+import SetupLink from '../../components/SetupLink'
 
 type Guardian = {
   id: string
@@ -18,17 +18,13 @@ type Guardian = {
 type SetupStep = 'connect' | 'guardians' | 'threshold' | 'review' | 'complete'
 
 export default function SetupPage() {
-  const { isConnected, address, account, status } = useAccount()
-  console.log('Account status:',  status, account, address)
-  console.log(account)
+  const { isConnected, address, account } = useAccount()
   const [currentStep, setCurrentStep] = useState<SetupStep>('connect')
   const [guardians, setGuardians] = useState<Guardian[]>([])
   const [newGuardianAddress, setNewGuardianAddress] = useState('')
   const [newGuardianName, setNewGuardianName] = useState('')
   const [threshold, setThreshold] = useState(2)
   const [error, setError] = useState<string | null>(null)
-  const {error: deployError} = useDeployAccount({contractAddress: address})
-  console.log(deployError)
 
   const { setupGuardians, isPending: isSubmitting, error: contractError } = useSetupGuardians()
 
@@ -40,7 +36,6 @@ export default function SetupPage() {
     { id: 'complete', title: 'Complete', icon: CheckCircle },
   ]
 
-  // Update step based on connection status
   useEffect(() => {
     if (!isConnected) {
       setCurrentStep('connect')
@@ -49,7 +44,6 @@ export default function SetupPage() {
     }
   }, [isConnected, currentStep])
 
-  // Handle contract errors
   useEffect(() => {
     if (contractError) {
       const errorMessage = contractError.message || 'Failed to setup guardians'
@@ -67,26 +61,6 @@ export default function SetupPage() {
 
   const validateStarkNetAddress = (addr: string): boolean => {
     return addr.startsWith('0x') && addr.length >= 60 && addr.length <= 66 && /^0x[0-9a-fA-F]+$/.test(addr)
-  }
-
-  const addTestGuardians = () => {
-    const testGuardians = [
-      { name: 'Test Guardian 1', address: '0x1234567890123456789012345678901234567890123456789012345678901234' },
-      { name: 'Test Guardian 2', address: '0x2345678901234567890123456789012345678901234567890123456789012345' },
-      { name: 'Test Guardian 3', address: '0x3456789012345678901234567890123456789012345678901234567890123456' },
-    ]
-    
-    setGuardians(testGuardians.map((g, index) => ({
-      id: `test-${index}`,
-      address: g.address,
-      name: g.name,
-      isValid: validateStarkNetAddress(g.address)
-    })))
-    
-    toast.info('Added test guardians for debugging', {
-      position: "top-right",
-      autoClose: 3000,
-    })
   }
 
   const addGuardian = () => {
@@ -152,8 +126,33 @@ export default function SetupPage() {
     }
 
     if (!account) {
-      
       toast.error('Account not available. Please reconnect your wallet.', {
+        position: "top-right",
+        autoClose: 3000,
+      })
+      return
+    }
+
+    if (guardians.length < 3) {
+      toast.error('At least 3 guardians are required', {
+        position: "top-right",
+        autoClose: 3000,
+      })
+      return
+    }
+
+    for (const guardian of guardians) {
+      if (!guardian.address || !guardian.isValid) {
+        toast.error(`Guardian ${guardian.name || 'Unknown'} has invalid address format`, {
+          position: "top-right",
+          autoClose: 3000,
+        })
+        return
+      }
+    }
+
+    if (threshold < 2 || threshold > guardians.length) {
+      toast.error(`Threshold must be between 2 and ${guardians.length}`, {
         position: "top-right",
         autoClose: 3000,
       })
@@ -163,27 +162,69 @@ export default function SetupPage() {
     setError(null)
     
     try {
-      console.log('Starting guardian setup...')
-      console.log('Connection status:', { isConnected, address, status })
-      console.log('Guardians:', guardians)
-      console.log('Threshold:', threshold)
-      
       try {
-        const nonce = await account.getNonce()
-        console.log('Account nonce verified:', nonce)
-      } catch (nonceError) {
-        console.error('Failed to verify account nonce:', nonceError)
+        await account.getNonce()
+      } catch {
         throw new Error('Account verification failed. Please reconnect your wallet.')
       }
       
       const guardianAddresses = guardians.map(g => g.address)
-      const merkleRoot = generateMerkleRoot(guardianAddresses)
       
-      console.log('Calling setupGuardians with:', { merkleRoot, threshold })
+      for (let i = 0; i < guardianAddresses.length; i++) {
+        const addr = guardianAddresses[i]
+        
+        if (!addr) {
+          throw new Error(`Guardian address ${i + 1} is empty`)
+        }
+        
+        if (!addr.startsWith('0x')) {
+          throw new Error(`Guardian address ${i + 1} does not start with 0x`)
+        }
+        
+        if (addr.length < 60 || addr.length > 66) {
+          throw new Error(`Guardian address ${i + 1} has invalid length`)
+        }
+      }
+      
+      let merkleRoot: string
+      try {
+        merkleRoot = generateMerkleRoot(guardianAddresses)
+        
+        if (!merkleRoot) {
+          throw new Error('Merkle root is null or undefined')
+        }
+        
+        if (merkleRoot === '0x0' || merkleRoot === '000') {
+          throw new Error('Merkle root is zero value')
+        }
+        
+        if (!merkleRoot.startsWith('0x')) {
+          throw new Error('Merkle root does not start with 0x')
+        }
+        
+        if (!/^0x[0-9a-fA-F]+$/.test(merkleRoot)) {
+          throw new Error('Merkle root contains invalid characters')
+        }
+        
+        if (merkleRoot.length < 10) {
+          throw new Error('Merkle root is too short')
+        }
+        
+      } catch (merkleError) {
+        let userErrorMsg = 'Failed to generate merkle tree from guardian addresses'
+        if (merkleError instanceof Error) {
+          if (merkleError.message.includes('Invalid StarkNet address')) {
+            userErrorMsg = 'One or more guardian addresses are invalid. Please check the addresses and try again.'
+          } else if (merkleError.message.includes('normalize')) {
+            userErrorMsg = 'Failed to process guardian addresses. Please verify all addresses are valid StarkNet addresses.'
+          } else {
+            userErrorMsg = `Merkle tree error: ${merkleError.message}`
+          }
+        }
+        throw new Error(userErrorMsg)
+      }
       
       const result = await setupGuardians(merkleRoot, threshold)
-      
-      console.log('Setup result:', result)
       
       if (result.success) {
         setCurrentStep('complete')
@@ -194,8 +235,8 @@ export default function SetupPage() {
       } else {
         throw new Error(result.error || 'Failed to setup guardians')
       }
+      
     } catch (error) {
-      console.error('Setup failed with error:', error)
       const errorMessage = error instanceof Error ? error.message : 'Failed to setup guardians'
       setError(errorMessage)
       toast.error(errorMessage, {
@@ -239,8 +280,8 @@ export default function SetupPage() {
             return (
               <div key={step.id} className="flex items-center">
                 <div className={`flex items-center justify-center w-12 h-12 rounded-xl transition-all duration-300 ${
-                  isStepCompleted(step.id) 
-                    ? 'bg-success-500 text-white' 
+                  isStepCompleted(step.id)
+                    ? 'bg-success-500 text-white'
                     : isStepActive(step.id)
                     ? 'bg-primary-600 text-white shadow-glow'
                     : 'bg-neutral-800 text-neutral-400'
@@ -410,13 +451,6 @@ export default function SetupPage() {
                     <span>All addresses must be valid</span>
                   </li>
                 </ul>
-                
-                <button
-                  onClick={addTestGuardians}
-                  className="mt-3 w-full btn-secondary text-sm py-2"
-                >
-                  Add Test Guardians (Debug)
-                </button>
               </div>
             </div>
           </div>
@@ -530,8 +564,8 @@ export default function SetupPage() {
         )}
 
         {currentStep === 'complete' && (
-          <div className="max-w-2xl mx-auto text-center space-y-8 animate-scale-in">
-            <div className="space-y-4">
+          <div className="max-w-2xl mx-auto space-y-8 animate-scale-in">
+            <div className="text-center space-y-4">
               <div className="w-20 h-20 bg-success-500 rounded-full flex items-center justify-center mx-auto">
                 <CheckCircle className="h-10 w-10 text-white" />
               </div>
@@ -541,7 +575,7 @@ export default function SetupPage() {
               </p>
             </div>
 
-            <div className="card p-8 space-y-6">
+            <div className="card p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4 text-center">
                 <div>
                   <p className="text-2xl font-bold text-success-400">{guardians.length}</p>
@@ -553,29 +587,72 @@ export default function SetupPage() {
                 </div>
               </div>
               
-              <div className="border-t border-neutral-700 pt-6">
-                <h4 className="text-white font-semibold mb-3">Whats Next?</h4>
-                <ul className="text-neutral-300 text-sm space-y-2 text-left">
-                  <li>Your guardians can now help you recover your wallet</li>
-                  <li>• Share the recovery link with trusted guardians</li>
-                  <li>• Monitor your setup in the dashboard</li>
-                </ul>
+              <div className="border-t border-neutral-700 pt-4">
+                <h4 className="text-white font-semibold mb-3">Setup Summary</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-neutral-400">Wallet Address:</span>
+                    <span className="text-white font-mono">
+                      {address ? `${address.slice(0, 8)}...${address.slice(-6)}` : 'N/A'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-neutral-400">Guardian Network:</span>
+                    <span className="text-white">{guardians.length} trusted guardians</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-neutral-400">Security Level:</span>
+                    <span className="text-white">{threshold}/{guardians.length} approvals required</span>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-4">
-              <button 
-                onClick={() => window.location.href = '/dashboard'}
-                className="btn-primary flex-1"
-              >
-                View Dashboard
-              </button>
-              <button 
-                onClick={() => window.location.href = '/guardian'}
-                className="btn-secondary flex-1"
-              >
-                Share with Guardians
-              </button>
+            {address && (
+              <SetupLink 
+                walletAddress={address}
+                guardianCount={guardians.length}
+                threshold={threshold}
+              />
+            )}
+
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row gap-4">
+                <button 
+                  onClick={() => window.location.href = '/dashboard'}
+                  className="btn-primary flex-1 flex items-center justify-center space-x-2"
+                >
+                  <Shield className="h-4 w-4" />
+                  <span>View Dashboard</span>
+                </button>
+                <button 
+                  onClick={() => window.location.href = '/recovery'}
+                  className="btn-secondary flex-1 flex items-center justify-center space-x-2"
+                >
+                  <Users className="h-4 w-4" />
+                  <span>Recovery Center</span>
+                </button>
+              </div>
+              
+              <div className="text-center">
+                <button 
+                  onClick={() => setCurrentStep('guardians')}
+                  className="btn-ghost text-sm"
+                >
+                  ← Back to Edit Guardians
+                </button>
+              </div>
+            </div>
+
+            <div className="card p-4 bg-blue-500/5 border-blue-500/20">
+              <h4 className="text-blue-400 font-semibold mb-3">What Happens Next?</h4>
+              <ol className="text-blue-300 text-sm space-y-2 list-decimal list-inside">
+                <li>Share the guardian link with your trusted friends/family</li>
+                <li>They&apos;ll connect their wallets and accept their guardian role</li>
+                <li>Your recovery system becomes fully active once guardians accept</li>
+                <li>Monitor guardian status in your dashboard</li>
+                <li>If you ever lose access, initiate recovery from any device</li>
+              </ol>
             </div>
           </div>
         )}
@@ -605,7 +682,7 @@ export default function SetupPage() {
             </span>
             <ArrowRight className="h-4 w-4" />
           </button>
-          </div>
+        </div>
       )}
     </div>
   )

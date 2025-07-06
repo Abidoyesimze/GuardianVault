@@ -32,6 +32,7 @@ export function useRecoveryContract() {
 }
 
 // Hook for setting up guardians
+// Hook for setting up guardians - FIXED VERSION
 export function useSetupGuardians() {
   const contract = useRecoveryContract();
   const { account } = useAccount();
@@ -43,7 +44,6 @@ export function useSetupGuardians() {
     console.log('setupGuardians called with:', { merkleRoot, threshold });
     console.log('Contract available:', !!contract);
     console.log('Account available:', !!account);
-    console.log(account)
     
     setIsPending(true);
     setError(null);
@@ -53,11 +53,18 @@ export function useSetupGuardians() {
         throw new Error('Contract not available');
       }
       
-      
       if (!account) {
         throw new Error('Account not available - please ensure wallet is connected');
       }
-      console.log('Account address:', account);
+
+      // Validate inputs
+      if (!merkleRoot || merkleRoot === '0x0' || merkleRoot === '000') {
+        throw new Error('Invalid merkle root provided');
+      }
+
+      if (threshold < 1 || threshold > 5) {
+        throw new Error('Threshold must be between 1 and 5');
+      }
       
       console.log('Executing setup_guardians with:', {
         contractAddress: RECOVERY_MANAGER_ADDRESS,
@@ -65,11 +72,11 @@ export function useSetupGuardians() {
         threshold
       });
       
-      // Use account.execute for reliable transaction execution
+      // Use the actual parameters instead of hardcoded values
       const result = await account.execute({
         contractAddress: RECOVERY_MANAGER_ADDRESS,
         entrypoint: 'setup_guardians',
-        calldata: ["000", "2"]
+        calldata: [merkleRoot, threshold.toString()]
       });
       
       console.log('Setup guardians result:', result);
