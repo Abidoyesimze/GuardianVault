@@ -13,7 +13,12 @@ import {
   Copy,
   Wallet,
   ArrowRight,
-  RefreshCw
+  RefreshCw,
+  Upload,
+  Link,
+  QrCode,
+  Edit,
+  Lock
 } from 'lucide-react'
 import { 
   useRecoveryRequest, 
@@ -25,10 +30,23 @@ import { RecoveryStatus } from '../../../types/recovery'
 import { generateMerkleProof } from '../../../lib/utils/merkle'
 import { getGuardianSignature, validateSignature } from '../../../lib/utils/signatures'
 import { RECOVERY_MANAGER_ADDRESS } from '../../../lib/contracts/recovery-manager'
-import { getGuardianAddresses, isGuardianForWallet } from '../../../lib/utils/guardianStorage'
+import { 
+  getGuardianAddresses, 
+  isGuardianForWallet,
+  importGuardianBackup,
+  parseRecoveryLink,
+  validateBackupData,
+  type BackupData 
+} from '../../../lib/utils/guardianStorage'
 import { toast } from 'react-toastify'
 
-type GuardianStep = 'connect' | 'verify-guardian' | 'no-requests' | 'review-request' | 'confirm-approval' | 'completed' | 'error' | 'invalid-wallet'
+type GuardianStep = 'connect' | 'verify-guardian' | 'missing-data' | 'restore-options' | 'manual-entry' | 'no-requests' | 'review-request' | 'confirm-approval' | 'completed' | 'error' | 'invalid-wallet'
+
+// Type for guardian data in backup files
+interface GuardianInBackup {
+  address: string
+  name?: string
+}
 
 function GuardianPortalContent() {
   const { address, isConnected, account } = useAccount()
@@ -43,8 +61,16 @@ function GuardianPortalContent() {
   const [guardianAddresses, setGuardianAddresses] = useState<string[]>([])
   const [hasVerified, setHasVerified] = useState(false)
   
+  // Restore-related state
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [linkInput, setLinkInput] = useState('')
+  const [manualGuardians, setManualGuardians] = useState<Array<{ name: string; address: string }>>([
+    { name: '', address: '' }
+  ])
+  
   // Use ref to prevent multiple verification attempts
   const verificationAttempted = useRef(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Contract hooks
   const { recoveryRequest, isLoading: loadingRequest, error: requestError, refetch: refetchRequest } = useRecoveryRequest(walletToRecover || undefined)
@@ -66,6 +92,23 @@ function GuardianPortalContent() {
       return
     }
   }, [walletToRecover])
+
+  const validateStarkNetAddress = (addr: string): boolean => {
+    return addr.startsWith('0x') && addr.length >= 60 && addr.length <= 66
+  }
+
+  // Separate function for recovery check logic
+  const proceedToRecoveryCheck = useCallback(() => {
+    // Check for active recovery requests
+    if (recoveryRequest && recoveryRequest.status === RecoveryStatus.Pending) {
+      setCurrentStep('review-request')
+    } else if (recoveryRequest && recoveryRequest.status === RecoveryStatus.None) {
+      setCurrentStep('no-requests')
+    } else {
+      setCurrentStep('no-requests')
+    }
+    setHasVerified(true)
+  }, [recoveryRequest])
 
   // Check if connected user is a valid guardian
   const verifyGuardianAccess = useCallback(async () => {
@@ -92,18 +135,14 @@ function GuardianPortalContent() {
           setHasVerified(true)
           return
         }
-      }
 
-      // Check for active recovery requests
-      if (recoveryRequest && recoveryRequest.status === RecoveryStatus.Pending) {
-        setCurrentStep('review-request')
-      } else if (recoveryRequest && recoveryRequest.status === RecoveryStatus.None) {
-        setCurrentStep('no-requests')
+        // Proceed to check recovery requests
+        proceedToRecoveryCheck()
       } else {
-        setCurrentStep('no-requests')
+        // No guardian data found - offer restore options
+        setCurrentStep('missing-data')
+        setHasVerified(true)
       }
-      
-      setHasVerified(true)
 
     } catch {
       setError('Failed to verify guardian access. Please try again.')
@@ -112,7 +151,200 @@ function GuardianPortalContent() {
     } finally {
       setIsVerifyingGuardian(false)
     }
-  }, [address, walletToRecover, guardianRoot, recoveryRequest])
+  }, [address, walletToRecover, guardianRoot, proceedToRecoveryCheck])
+
+  // File restore
+  const handleFileRestore = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setIsProcessing(true)
+    
+    try {
+      const content = await file.text()
+      const guardianData = JSON.parse(content) as BackupData
+      
+      // Validate backup file format
+      const validation = validateBackupData(guardianData)
+      if (!validation.isValid) {
+        throw new Error(validation.error || 'Invalid backup file format')
+      }
+
+      // Verify against on-chain data
+      if (guardianData.merkleRoot !== guardianRoot) {
+        throw new Error('Backup file does not match on-chain guardian configuration')
+      }
+
+      // Check if connected address is in the guardian list
+      const isValidGuardian = guardianData.guardians.some((g: GuardianInBackup) => 
+        g.address.toLowerCase() === address?.toLowerCase()
+      )
+
+      if (!isValidGuardian) {
+        throw new Error('You are not listed as a guardian in this backup file')
+      }
+
+      // Import and proceed
+      const success = importGuardianBackup(guardianData)
+      if (success) {
+        setGuardianAddresses(guardianData.guardians.map((g: GuardianInBackup) => g.address))
+        proceedToRecoveryCheck()
+        toast.success('🎉 Guardian data restored from file!')
+      } else {
+        throw new Error('Failed to import backup data')
+      }
+    } catch (error) {
+      toast.error(`Failed to restore from file: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setIsProcessing(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    }
+  }
+
+  // Recovery link restore
+  const handleLinkRestore = async (linkData?: string) => {
+    const data = linkData || linkInput
+    if (!data) return
+
+    setIsProcessing(true)
+    
+    try {
+      let guardianData: BackupData | null = null
+
+      if (data.includes('/recovery/restore?data=')) {
+        // Parse from URL
+        guardianData = parseRecoveryLink(data)
+        if (!guardianData) throw new Error('Invalid recovery link format')
+      } else {
+        // Direct encrypted data
+        try {
+          const decodedData = atob(data)
+          guardianData = JSON.parse(decodedData) as BackupData
+        } catch {
+          throw new Error('Invalid recovery data format')
+        }
+      }
+      
+      // Validate and verify
+      const validation = validateBackupData(guardianData)
+      if (!validation.isValid) {
+        throw new Error(validation.error || 'Invalid recovery data')
+      }
+
+      if (guardianData.merkleRoot !== guardianRoot) {
+        throw new Error('Recovery data does not match on-chain configuration')
+      }
+
+      // Check if connected address is in the guardian list
+      const isValidGuardian = guardianData.guardians.some((g: GuardianInBackup) => 
+        g.address.toLowerCase() === address?.toLowerCase()
+      )
+
+      if (!isValidGuardian) {
+        throw new Error('You are not listed as a guardian in this recovery data')
+      }
+
+      // Import and proceed
+      const success = importGuardianBackup(guardianData)
+      if (success) {
+        setGuardianAddresses(guardianData.guardians.map((g: GuardianInBackup) => g.address))
+        proceedToRecoveryCheck()
+        toast.success('🎉 Guardian data restored from recovery link!')
+      } else {
+        throw new Error('Failed to import recovery data')
+      }
+    } catch (error) {
+      toast.error(`Failed to restore from link: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setIsProcessing(false)
+      setLinkInput('')
+    }
+  }
+
+  // QR code restore (simplified - in production use a proper QR scanner)
+  const handleQRRestore = async () => {
+    setIsProcessing(true)
+    
+    try {
+      // In production, use a QR scanner library
+      const qrData = prompt('Paste the QR code data or recovery link:')
+      if (!qrData) return
+
+      await handleLinkRestore(qrData)
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  // Manual guardian entry
+  const addManualGuardian = () => {
+    setManualGuardians([...manualGuardians, { name: '', address: '' }])
+  }
+
+  const removeManualGuardian = (index: number) => {
+    if (manualGuardians.length > 1) {
+      setManualGuardians(manualGuardians.filter((_, i) => i !== index))
+    }
+  }
+
+  const updateManualGuardian = (index: number, field: 'name' | 'address', value: string) => {
+    const updated = manualGuardians.map((guardian, i) => 
+      i === index ? { ...guardian, [field]: value } : guardian
+    )
+    setManualGuardians(updated)
+  }
+
+  const confirmManualEntry = () => {
+    const validGuardians = manualGuardians.filter(g => 
+      g.address && validateStarkNetAddress(g.address)
+    )
+
+    if (validGuardians.length < (threshold || 1)) {
+      toast.error(`Need at least ${threshold} valid guardian addresses`)
+      return
+    }
+
+    // Check if connected address is in the guardian list
+    const isValidGuardian = validGuardians.some(g => 
+      g.address.toLowerCase() === address?.toLowerCase()
+    )
+
+    if (!isValidGuardian) {
+      toast.error('You must include your own address in the guardian list')
+      return
+    }
+
+    // Create guardian data structure - exactly matching BackupData interface
+    const guardianData: BackupData = {
+      version: '1.0',
+      type: 'guardian-backup' as const,  // Ensure exact type match
+      walletAddress: walletToRecover!,
+      guardians: validGuardians.map(g => ({
+        address: g.address,
+        name: g.name || 'Unnamed Guardian'
+      })),
+      merkleRoot: guardianRoot!,
+      threshold: threshold || validGuardians.length,
+      createdAt: new Date().toISOString()
+    }
+
+    // Debug logging
+    console.log('Manual guardian data being imported:', guardianData)
+    console.log('Guardian data type:', guardianData.type)
+    console.log('Guardian data structure:', JSON.stringify(guardianData, null, 2))
+
+    // Import and proceed
+    const success = importGuardianBackup(guardianData)
+    if (success) {
+      setGuardianAddresses(validGuardians.map(g => g.address))
+      proceedToRecoveryCheck()
+      toast.success('Guardian information saved and verified!')
+    } else {
+      toast.error('Failed to save guardian information')
+    }
+  }
 
   // Reset verification when wallet changes
   useEffect(() => {
@@ -376,6 +608,244 @@ function GuardianPortalContent() {
           <p className="text-neutral-300">
             {isVerifyingGuardian ? 'Verifying guardian access...' : 'Loading recovery data...'}
           </p>
+        </div>
+      )}
+
+      {/* Missing Guardian Data Step */}
+      {currentStep === 'missing-data' && (
+        <div className="max-w-2xl mx-auto space-y-8 animate-scale-in">
+          <div className="text-center space-y-4">
+            <Lock className="h-16 w-16 text-warning-500 mx-auto" />
+            <h2 className="text-2xl font-bold text-white">Guardian Data Required</h2>
+            <p className="text-neutral-300">
+              Guardian information is needed to verify your authorization for this wallet.
+            </p>
+          </div>
+
+          {/* Contract Info */}
+          <div className="card p-6 bg-blue-500/5 border-blue-500/20">
+            <h3 className="text-blue-400 font-semibold mb-3">✅ Found On-Chain Setup</h3>
+            <div className="text-blue-300 text-sm space-y-1">
+              <p>• Guardian Merkle Root: {guardianRoot?.slice(0, 20)}...</p>
+              <p>• Required Approvals: {threshold}</p>
+              <p>• Wallet: {walletToRecover?.slice(0, 10)}...{walletToRecover?.slice(-10)}</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <button
+              onClick={() => setCurrentStep('restore-options')}
+              className="btn-primary w-full"
+            >
+              Restore Guardian Information
+            </button>
+            
+            <div className="card p-4 bg-purple-500/5 border-purple-500/20">
+              <h4 className="text-purple-400 font-semibold mb-2">💡 Why is this needed?</h4>
+              <p className="text-purple-300 text-sm">
+                Guardian addresses are stored privately for security. You need to restore your 
+                guardian information from a backup to verify your authorization and approve recovery requests.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Restore Options Step */}
+      {currentStep === 'restore-options' && (
+        <div className="max-w-2xl mx-auto space-y-8 animate-scale-in">
+          <div className="text-center space-y-4">
+            <RefreshCw className="h-16 w-16 text-primary-500 mx-auto" />
+            <h2 className="text-2xl font-bold text-white">Restore Guardian Data</h2>
+            <p className="text-neutral-300">
+              Choose how you&apos;d like to restore your guardian information
+            </p>
+          </div>
+
+          {/* Restore Methods */}
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* File Upload */}
+            <div className="card p-6 space-y-4">
+              <div className="flex items-center space-x-3">
+                <Upload className="h-6 w-6 text-primary-400" />
+                <h3 className="text-lg font-semibold text-white">Upload Backup File</h3>
+              </div>
+              <p className="text-neutral-300 text-sm">
+                Upload your guardian backup JSON file to restore your configuration.
+              </p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleFileRestore}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isProcessing}
+                className="btn-primary w-full"
+              >
+                {isProcessing ? 'Processing...' : 'Choose File'}
+              </button>
+            </div>
+
+            {/* QR Code Scanner */}
+            <div className="card p-6 space-y-4">
+              <div className="flex items-center space-x-3">
+                <QrCode className="h-6 w-6 text-primary-400" />
+                <h3 className="text-lg font-semibold text-white">Scan QR Code</h3>
+              </div>
+              <p className="text-neutral-300 text-sm">
+                Scan the QR code from your guardian backup to restore access.
+              </p>
+              <button
+                onClick={handleQRRestore}
+                disabled={isProcessing}
+                className="btn-primary w-full"
+              >
+                {isProcessing ? 'Processing...' : 'Scan QR Code'}
+              </button>
+            </div>
+
+            {/* Recovery Link */}
+            <div className="card p-6 space-y-4">
+              <div className="flex items-center space-x-3">
+                <Link className="h-6 w-6 text-primary-400" />
+                <h3 className="text-lg font-semibold text-white">Recovery Link</h3>
+              </div>
+              <p className="text-neutral-300 text-sm">
+                Paste your recovery link or encrypted guardian data.
+              </p>
+              <div className="space-y-2">
+                <textarea
+                  value={linkInput}
+                  onChange={(e) => setLinkInput(e.target.value)}
+                  placeholder="Paste recovery link or encrypted data here..."
+                  className="input-field w-full h-20 resize-none"
+                />
+                <button
+                  onClick={() => handleLinkRestore()}
+                  disabled={!linkInput || isProcessing}
+                  className="btn-primary w-full"
+                >
+                  {isProcessing ? 'Processing...' : 'Restore from Link'}
+                </button>
+              </div>
+            </div>
+
+            {/* Manual Entry (Last Resort) */}
+            <div className="card p-6 space-y-4">
+              <div className="flex items-center space-x-3">
+                <Edit className="h-6 w-6 text-warning-400" />
+                <h3 className="text-lg font-semibold text-white">Manual Entry</h3>
+              </div>
+              <p className="text-neutral-300 text-sm">
+                Enter guardian addresses manually if you don&apos;t have backup files.
+              </p>
+              <button
+                onClick={() => setCurrentStep('manual-entry')}
+                className="btn-secondary w-full"
+              >
+                Enter Manually
+              </button>
+            </div>
+          </div>
+
+          {/* Back Button */}
+          <div className="text-center">
+            <button
+              onClick={() => setCurrentStep('missing-data')}
+              className="btn-ghost"
+            >
+              ← Back
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Entry Step */}
+      {currentStep === 'manual-entry' && (
+        <div className="max-w-2xl mx-auto space-y-8 animate-scale-in">
+          <div className="text-center space-y-4">
+            <Edit className="h-16 w-16 text-warning-500 mx-auto" />
+            <h2 className="text-2xl font-bold text-white">Enter Guardian Addresses</h2>
+            <p className="text-neutral-300">
+              Enter the guardian addresses for this wallet. You need at least {threshold} guardians.
+            </p>
+          </div>
+
+          <div className="card p-6 space-y-6">
+            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4">
+              <h4 className="text-yellow-400 font-semibold mb-2">⚠️ Manual Entry</h4>
+              <p className="text-yellow-300 text-sm">
+                Make sure to include your own address as one of the guardians. The addresses must 
+                match the original guardian setup exactly.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              {manualGuardians.map((guardian, index) => (
+                <div key={index} className="space-y-2">
+                  <div className="flex justify-between">
+                    <label className="text-white font-medium">Guardian {index + 1}</label>
+                    {manualGuardians.length > 1 && (
+                      <button
+                        onClick={() => removeManualGuardian(index)}
+                        className="text-error-400 hover:text-error-300 text-sm"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Guardian name (optional)"
+                    value={guardian.name}
+                    onChange={(e) => updateManualGuardian(index, 'name', e.target.value)}
+                    className="input-field w-full"
+                  />
+                  <input
+                    type="text"
+                    placeholder="0x... Guardian address"
+                    value={guardian.address}
+                    onChange={(e) => updateManualGuardian(index, 'address', e.target.value)}
+                    className="input-field w-full"
+                  />
+                  {guardian.address && !validateStarkNetAddress(guardian.address) && (
+                    <p className="text-error-400 text-sm">Invalid StarkNet address format</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-between">
+              <button
+                onClick={addManualGuardian}
+                className="btn-secondary"
+              >
+                Add Guardian
+              </button>
+              <span className="text-neutral-400 text-sm self-center">
+                {manualGuardians.filter(g => g.address && validateStarkNetAddress(g.address)).length} / {threshold} minimum
+              </span>
+            </div>
+
+            <div className="flex space-x-4">
+              <button
+                onClick={() => setCurrentStep('restore-options')}
+                className="btn-ghost flex-1"
+              >
+                ← Back
+              </button>
+              <button
+                onClick={confirmManualEntry}
+                disabled={manualGuardians.filter(g => g.address && validateStarkNetAddress(g.address)).length < (threshold || 1)}
+                className="btn-primary flex-1"
+              >
+                Confirm Guardians
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -672,12 +1142,23 @@ function GuardianPortalContent() {
               </div>
             )}
             
-            <button
-              onClick={() => window.location.reload()}
-              className="btn-primary"
-            >
-              Try Again
-            </button>
+            <div className="space-y-3">
+              <button
+                onClick={() => {
+                  setCurrentStep('missing-data')
+                  setError(null)
+                }}
+                className="btn-primary"
+              >
+                Try Restoring Guardian Data
+              </button>
+              <button
+                onClick={() => window.location.reload()}
+                className="btn-secondary"
+              >
+                Reload Page
+              </button>
+            </div>
           </div>
         </div>
       )}

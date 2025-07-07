@@ -4,8 +4,7 @@ import { useContract, useAccount } from '@starknet-react/core';
 import { RECOVERY_MANAGER_ABI, RECOVERY_MANAGER_ADDRESS } from '../contracts/recovery-manager';
 import { RecoveryRequest, RecoveryStatus, TransactionResult } from '../../types/recovery';
 import { parseCairoError } from '../utils/errors';
-import { useState, useCallback, useEffect, useMemo } from 'react';
-
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 
 // Type definitions for contract responses
 interface ContractError {
@@ -32,7 +31,6 @@ export function useRecoveryContract() {
 }
 
 // Hook for setting up guardians
-// Hook for setting up guardians - FIXED VERSION
 export function useSetupGuardians() {
   const contract = useRecoveryContract();
   const { account } = useAccount();
@@ -71,7 +69,6 @@ export function useSetupGuardians() {
         merkleRoot,
         threshold
       });
-      
       
       const result = await account.execute({
         contractAddress: RECOVERY_MANAGER_ADDRESS,
@@ -125,7 +122,6 @@ export function useInitiateRecovery() {
     try {
       if (!contract || !account) throw new Error('Contract or account not available');
       
-      // Use account.execute for consistency
       const result = await account.execute({
         contractAddress: RECOVERY_MANAGER_ADDRESS,
         entrypoint: 'initiate_recovery',
@@ -182,7 +178,6 @@ export function useApproveRecovery() {
     try {
       if (!contract || !account) throw new Error('Contract or account not available');
       
-      // Use account.execute and format calldata properly for array
       const result = await account.execute({
         contractAddress: RECOVERY_MANAGER_ADDRESS,
         entrypoint: 'approve_recovery',
@@ -191,8 +186,8 @@ export function useApproveRecovery() {
           guardianAddress,
           signatureR,
           signatureS,
-          merkleProof.length.toString(), // Array length first
-          ...merkleProof // Then array elements
+          merkleProof.length.toString(),
+          ...merkleProof
         ]
       });
       
@@ -240,7 +235,6 @@ export function useFinalizeRecovery() {
     try {
       if (!contract || !account) throw new Error('Contract or account not available');
       
-      // Use account.execute for consistency
       const result = await account.execute({
         contractAddress: RECOVERY_MANAGER_ADDRESS,
         entrypoint: 'finalize_recovery',
@@ -276,53 +270,73 @@ export function useFinalizeRecovery() {
   };
 }
 
-// Generic hook for contract read calls
+// FIXED: Generic hook for contract read calls
 function useContractRead(methodName: string, args?: string[]) {
   const contract = useRecoveryContract();
   const [data, setData] = useState<ContractCallResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ContractError | null>(null);
-
-  // Memoize args to prevent unnecessary re-renders
-  const memoizedArgs = useMemo(() => {
-    if (!args || args.length === 0) return [];
-    return args.filter(arg => arg !== undefined && arg !== null);
+  
+  // Use ref to track if we've made a call for these args to prevent duplicates
+  const lastCallArgs = useRef<string>('');
+  
+  // Stable args key for comparison
+  const argsKey = useMemo(() => {
+    if (!args || args.length === 0) return '';
+    return args.filter(arg => arg !== undefined && arg !== null).join(',');
   }, [args]);
   
+  // Only create fetchData when we actually need it
   const fetchData = useCallback(async () => {
-    if (!contract || !memoizedArgs || memoizedArgs.length === 0) return;
+    if (!contract || !argsKey) return;
+    
+    // Prevent duplicate calls
+    if (lastCallArgs.current === argsKey) return;
     
     setIsLoading(true);
     setError(null);
+    lastCallArgs.current = argsKey;
     
     try {
-      // Use the contract's call method directly with proper typing
-      const result = await (contract as unknown as { call: (method: string, args: string[]) => Promise<ContractCallResult> }).call(methodName, memoizedArgs);
+      const result = await (contract as unknown as { 
+        call: (method: string, args: string[]) => Promise<ContractCallResult> 
+      }).call(methodName, argsKey.split(','));
+      
       setData(result);
     } catch (err) {
       const error = err as ContractError;
       const userFriendlyError = parseCairoError(error);
       setError({ message: userFriendlyError });
       console.error(`Error calling ${methodName}:`, userFriendlyError);
+      
+      // Reset lastCallArgs on error so it can be retried
+      lastCallArgs.current = '';
     } finally {
       setIsLoading(false);
     }
-  }, [contract, methodName, memoizedArgs]);
+  }, [contract, methodName, argsKey]);
 
+  // Only fetch when we have valid args and haven't already called
   useEffect(() => {
-    if (memoizedArgs && memoizedArgs.length > 0 && !memoizedArgs.some(arg => !arg)) {
+    if (argsKey && lastCallArgs.current !== argsKey) {
       fetchData();
     }
-  }, [fetchData, memoizedArgs]);
+  }, [argsKey, fetchData]);
 
   return { data, isLoading, error, refetch: fetchData };
 }
 
-// Hook for reading recovery request
+// FIXED: Hook for reading recovery request
 export function useRecoveryRequest(oldWallet?: string) {
+  // Memoize args to prevent recreation
+  const args = useMemo(() => 
+    oldWallet ? [oldWallet] : undefined, 
+    [oldWallet]
+  );
+  
   const { data, isLoading, error, refetch } = useContractRead(
     'get_recovery_request',
-    oldWallet ? [oldWallet] : undefined
+    args
   );
 
   const recoveryRequest = useMemo(() => {
@@ -349,11 +363,16 @@ export function useRecoveryRequest(oldWallet?: string) {
   };
 }
 
-// Hook for checking if recovery is approved
+// FIXED: Hook for checking if recovery is approved
 export function useIsRecoveryApproved(oldWallet?: string) {
+  const args = useMemo(() => 
+    oldWallet ? [oldWallet] : undefined, 
+    [oldWallet]
+  );
+  
   const { data, isLoading, error } = useContractRead(
     'is_recovery_approved',
-    oldWallet ? [oldWallet] : undefined
+    args
   );
 
   const isApproved = useMemo(() => Boolean(data), [data]);
@@ -365,11 +384,16 @@ export function useIsRecoveryApproved(oldWallet?: string) {
   };
 }
 
-// Hook for getting guardian root
+// FIXED: Hook for getting guardian root
 export function useGuardianRoot(wallet?: string) {
+  const args = useMemo(() => 
+    wallet ? [wallet] : undefined, 
+    [wallet]
+  );
+  
   const { data, isLoading, error } = useContractRead(
     'get_guardian_root',
-    wallet ? [wallet] : undefined
+    args
   );
 
   const guardianRoot = useMemo(() => data?.toString() || '', [data]);
@@ -381,11 +405,16 @@ export function useGuardianRoot(wallet?: string) {
   };
 }
 
-// Hook for getting threshold
+// FIXED: Hook for getting threshold
 export function useThreshold(wallet?: string) {
+  const args = useMemo(() => 
+    wallet ? [wallet] : undefined, 
+    [wallet]
+  );
+  
   const { data, isLoading, error } = useContractRead(
     'get_threshold',
-    wallet ? [wallet] : undefined
+    args
   );
 
   const threshold = useMemo(() => Number(data) || 0, [data]);
@@ -397,11 +426,16 @@ export function useThreshold(wallet?: string) {
   };
 }
 
-// Hook for getting approval count
+// FIXED: Hook for getting approval count
 export function useApprovalCount(oldWallet?: string) {
+  const args = useMemo(() => 
+    oldWallet ? [oldWallet] : undefined, 
+    [oldWallet]
+  );
+  
   const { data, isLoading, error } = useContractRead(
     'get_approval_count',
-    oldWallet ? [oldWallet] : undefined
+    args
   );
 
   const approvalCount = useMemo(() => Number(data) || 0, [data]);

@@ -1,8 +1,7 @@
 'use client'
-
-import { useState, useEffect } from 'react'
-import { useAccount } from '@starknet-react/core'
-import { toast } from 'react-toastify'
+import React, { useState, useEffect, useRef } from 'react';
+import { useAccount } from '@starknet-react/core';
+import { toast } from 'react-toastify';
 import { 
   Search, 
   Clock, 
@@ -15,8 +14,14 @@ import {
   ExternalLink,
   Wallet,
   AlertTriangle,
-  Info
-} from 'lucide-react'
+  Lock,
+  Eye,
+  EyeOff,
+  Upload,
+  QrCode,
+  Link,
+  Edit
+} from 'lucide-react';
 import { 
   useInitiateRecovery, 
   useRecoveryRequest, 
@@ -24,11 +29,18 @@ import {
   useGuardianRoot, 
   useThreshold,
   useFinalizeRecovery 
-} from '../../../lib/hooks/useRecoveryContract'
-import { RecoveryStatus } from '../../../types/recovery'
-import { getGuardianInfo } from '../../../lib/utils/guardianStorage'
+} from '../../../lib/hooks/useRecoveryContract';
+import { RecoveryStatus } from '../../../types/recovery';
+import { 
+  getGuardianInfo, 
+  importGuardianBackup, 
+  parseRecoveryLink,
+  validateBackupData,
+  type BackupData,
+  type WalletGuardians
+} from '../../../lib/utils/guardianStorage';
 
-type PageStep = 'connect' | 'search' | 'initiate' | 'progress' | 'complete' | 'no-setup'
+type PageStep = 'connect' | 'search' | 'restore-options' | 'manual-entry' | 'initiate' | 'progress' | 'complete' | 'no-setup'
 
 type Guardian = {
   name?: string
@@ -48,6 +60,12 @@ type Recovery = {
   timeRemaining?: string
 }
 
+// Type for guardian data in the proceedWithGuardianInfo function
+interface GuardianData {
+  guardians: Array<{ name?: string; address: string }>
+  threshold: number
+}
+
 export default function RecoveryPage() {
   const { address, isConnected } = useAccount()
   const [oldWalletAddress, setOldWalletAddress] = useState('')
@@ -56,6 +74,17 @@ export default function RecoveryPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [showPrivacyDetails, setShowPrivacyDetails] = useState(false)
+  
+  // Restore-related state
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [linkInput, setLinkInput] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  // Manual entry state
+  const [manualGuardians, setManualGuardians] = useState<Array<{ name: string; address: string }>>([
+    { name: '', address: '' }
+  ])
 
   // Contract hooks for the old wallet we're trying to recover
   const { recoveryRequest, isLoading: recoveryLoading, refetch: refetchRecovery } = useRecoveryRequest(oldWalletAddress || undefined)
@@ -114,6 +143,48 @@ export default function RecoveryPage() {
     return `${hours}h ${minutes}m remaining`
   }
 
+  const proceedWithGuardianInfo = (guardianInfo: WalletGuardians | BackupData | GuardianData) => {
+    const guardians: Guardian[] = guardianInfo.guardians.map((g: { name?: string; address: string }) => ({
+      name: g.name,
+      address: g.address,
+      hasApproved: false,
+      approvedAt: undefined
+    }))
+
+    // Check for existing recovery request
+    if (recoveryRequest && recoveryRequest.status !== RecoveryStatus.None) {
+      const recoveryData: Recovery = {
+        oldWalletAddress,
+        newWalletAddress: recoveryRequest.new_wallet,
+        requiredApprovals: threshold || guardianInfo.threshold,
+        currentApprovals: recoveryRequest.approvals,
+        status: recoveryRequest.status,
+        createdAt: new Date(recoveryRequest.timestamp * 1000),
+        guardians,
+        timeRemaining: formatTimeRemaining(recoveryRequest.timestamp)
+      }
+      
+      setRecovery(recoveryData)
+      setCurrentStep('progress')
+    } else {
+      // No existing recovery request
+      const recoveryData: Recovery = {
+        oldWalletAddress,
+        newWalletAddress: address!,
+        requiredApprovals: threshold || guardianInfo.threshold,
+        currentApprovals: 0,
+        status: RecoveryStatus.None,
+        createdAt: new Date(),
+        guardians
+      }
+      
+      setRecovery(recoveryData)
+      setCurrentStep('initiate')
+    }
+    
+    toast.success('✅ Guardian configuration loaded successfully!')
+  }
+
   const searchForRecovery = async () => {
     if (!oldWalletAddress || !isConnected || !address) return
 
@@ -135,97 +206,28 @@ export default function RecoveryPage() {
         return
       }
 
-      // Check if threshold exists
       if (!threshold || threshold === 0) {
         setCurrentStep('no-setup')
         setError('Guardian configuration incomplete for this wallet.')
         return
       }
 
-      // FOR MERKLE TREE DESIGN: Guardian addresses come from local storage
-      // The contract only stores the Merkle root for privacy
+      // First try local storage
       const guardianInfo = getGuardianInfo(oldWalletAddress)
-
-      let guardians: Guardian[] = []
       
-      if (guardianInfo && guardianInfo.guardians.length > 0) {
-        // Use guardian info from local storage
-        guardians = guardianInfo.guardians.map(g => ({
-          name: g.name,
-          address: g.address,
-          hasApproved: false,
-          approvedAt: undefined
-        }))
-        
-        // Validate that we have enough guardians for the threshold
-        if (guardians.length < threshold) {
-          setCurrentStep('no-setup')
-          setError(`Guardian setup incomplete. Expected at least ${threshold} guardians, found ${guardians.length}.`)
-          return
-        }
-      } else {
-        // No local guardian info found
-        setCurrentStep('no-setup')
-        setError(`No guardian information found in local storage. 
-          
-In a Merkle tree-based system, guardian addresses are not stored on-chain for privacy. 
-You need to have the guardian information from when you initially set up the guardians.`)
+      if (guardianInfo && guardianInfo.guardians.length >= threshold) {
+        // Local storage success - proceed normally
+        proceedWithGuardianInfo(guardianInfo)
         return
       }
 
-      // Check if there's an existing recovery request
-      if (recoveryRequest && recoveryRequest.status !== RecoveryStatus.None) {
-        const recoveryData: Recovery = {
-          oldWalletAddress,
-          newWalletAddress: recoveryRequest.new_wallet,
-          requiredApprovals: threshold,
-          currentApprovals: recoveryRequest.approvals,
-          status: recoveryRequest.status,
-          createdAt: new Date(recoveryRequest.timestamp * 1000),
-          guardians,
-          timeRemaining: formatTimeRemaining(recoveryRequest.timestamp)
-        }
-        
-        setRecovery(recoveryData)
-        
-        if (recoveryRequest.status === RecoveryStatus.Pending) {
-          setCurrentStep('progress')
-          toast.success('✅ Found existing recovery request in progress!', {
-            position: "top-right",
-            autoClose: 3000,
-          })
-        } else if (recoveryRequest.status === RecoveryStatus.Approved) {
-          setCurrentStep('progress')
-          toast.success('🎉 Recovery approved! You can finalize it now.', {
-            position: "top-right",
-            autoClose: 3000,
-          })
-        } else if (recoveryRequest.status === RecoveryStatus.Completed) {
-          setCurrentStep('complete')
-          toast.success('✅ Recovery already completed!', {
-            position: "top-right",
-            autoClose: 3000,
-          })
-        }
-      } else {
-        // No existing recovery request, set up for initiation
-        const recoveryData: Recovery = {
-          oldWalletAddress,
-          newWalletAddress: address,
-          requiredApprovals: threshold,
-          currentApprovals: 0,
-          status: RecoveryStatus.None,
-          createdAt: new Date(),
-          guardians
-        }
-        
-        setRecovery(recoveryData)
-        setCurrentStep('initiate')
-        toast.success('✅ Guardian setup found! Ready to initiate recovery.', {
-          position: "top-right",
-          autoClose: 3000,
-        })
-      }
+      // Local storage failed - show restore options
+      setCurrentStep('restore-options')
+      toast.info('💾 Local guardian data not found. Please restore from backup.', {
+        position: "top-right",
+        autoClose: 5000,
+      })
+
     } catch {
       const errorMessage = 'Failed to find recovery setup. Please check the wallet address.'
       setError(errorMessage)
@@ -235,6 +237,168 @@ You need to have the guardian information from when you initially set up the gua
       })
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  // File restore
+  const handleFileRestore = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setIsProcessing(true)
+    
+    try {
+      const content = await file.text()
+      const guardianData = JSON.parse(content) as BackupData
+      
+      // Validate backup file format
+      const validation = validateBackupData(guardianData)
+      if (!validation.isValid) {
+        throw new Error(validation.error || 'Invalid backup file format')
+      }
+
+      // Verify against on-chain data
+      if (guardianData.merkleRoot !== guardianRoot) {
+        throw new Error('Backup file does not match on-chain guardian configuration')
+      }
+
+      // Import and proceed
+      const success = importGuardianBackup(guardianData)
+      if (success) {
+        proceedWithGuardianInfo(guardianData)
+        toast.success('🎉 Guardian data restored from file!')
+      } else {
+        throw new Error('Failed to import backup data')
+      }
+    } catch (error) {
+      toast.error(`Failed to restore from file: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setIsProcessing(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    }
+  }
+
+  // QR code restore (simplified - in production use a proper QR scanner)
+  const handleQRRestore = async () => {
+    setIsProcessing(true)
+    
+    try {
+      // In production, use a QR scanner library
+      const qrData = prompt('Paste the QR code data or recovery link:')
+      if (!qrData) return
+
+      await handleLinkRestore(qrData)
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  // Recovery link restore
+  const handleLinkRestore = async (linkData?: string) => {
+    const data = linkData || linkInput
+    if (!data) return
+
+    setIsProcessing(true)
+    
+    try {
+      let guardianData: BackupData | null = null
+
+      if (data.includes('/recovery/restore?data=')) {
+        // Parse from URL
+        guardianData = parseRecoveryLink(data)
+        if (!guardianData) throw new Error('Invalid recovery link format')
+      } else {
+        // Direct encrypted data
+        try {
+          const decodedData = atob(data)
+          guardianData = JSON.parse(decodedData) as BackupData
+        } catch {
+          throw new Error('Invalid recovery data format')
+        }
+      }
+      
+      // Validate and verify
+      const validation = validateBackupData(guardianData)
+      if (!validation.isValid) {
+        throw new Error(validation.error || 'Invalid recovery data')
+      }
+
+      if (guardianData.merkleRoot !== guardianRoot) {
+        throw new Error('Recovery data does not match on-chain configuration')
+      }
+
+      // Import and proceed
+      const success = importGuardianBackup(guardianData)
+      if (success) {
+        proceedWithGuardianInfo(guardianData)
+        toast.success('🎉 Guardian data restored from recovery link!')
+      } else {
+        throw new Error('Failed to import recovery data')
+      }
+    } catch (error) {
+      toast.error(`Failed to restore from link: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setIsProcessing(false)
+      setLinkInput('')
+    }
+  }
+
+  // Manual guardian entry
+  const addManualGuardian = () => {
+    setManualGuardians([...manualGuardians, { name: '', address: '' }])
+  }
+
+  const removeManualGuardian = (index: number) => {
+    if (manualGuardians.length > 1) {
+      setManualGuardians(manualGuardians.filter((_, i) => i !== index))
+    }
+  }
+
+  const updateManualGuardian = (index: number, field: 'name' | 'address', value: string) => {
+    const updated = manualGuardians.map((guardian, i) => 
+      i === index ? { ...guardian, [field]: value } : guardian
+    )
+    setManualGuardians(updated)
+  }
+
+  const confirmManualEntry = () => {
+    const validGuardians = manualGuardians.filter(g => 
+      g.address && validateStarkNetAddress(g.address)
+    )
+
+    if (validGuardians.length < (threshold || 1)) {
+      toast.error(`Need at least ${threshold} valid guardian addresses`)
+      return
+    }
+
+    // Create guardian data structure - exactly matching BackupData interface
+    const guardianData: BackupData = {
+      version: '1.0',
+      type: 'guardian-backup' as const,  // Ensure exact type match
+      walletAddress: oldWalletAddress,
+      guardians: validGuardians.map(g => ({
+        address: g.address,
+        name: g.name || 'Unnamed Guardian'
+      })),
+      merkleRoot: guardianRoot!,
+      threshold: threshold || validGuardians.length,
+      createdAt: new Date().toISOString()
+    }
+
+    // Debug logging
+    console.log('Manual guardian data being imported:', guardianData)
+    console.log('Guardian data type:', guardianData.type)
+    console.log('Guardian data structure:', JSON.stringify(guardianData, null, 2))
+
+    // Import and proceed
+    const success = importGuardianBackup(guardianData)
+    if (success) {
+      proceedWithGuardianInfo(guardianData)
+      toast.success('Guardian information saved and verified!')
+    } else {
+      toast.error('Failed to save guardian information')
     }
   }
 
@@ -345,18 +509,57 @@ You need to have the guardian information from when you initially set up the gua
   }
 
   // Privacy Info Component
-  const MerkleTreeInfo = () => (
+  const PrivacyExplanation = () => (
     <div className="card p-6 bg-blue-500/5 border-blue-500/20">
-      <div className="flex items-center space-x-3 mb-3">
-        <Info className="h-5 w-5 text-blue-400" />
-        <h3 className="text-blue-400 font-semibold">🔒 Privacy-Preserving Guardian System</h3>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center space-x-3">
+          <Lock className="h-5 w-5 text-blue-400" />
+          <h3 className="text-blue-400 font-semibold">🔒 Privacy-First Design</h3>
+        </div>
+        <button 
+          onClick={() => setShowPrivacyDetails(!showPrivacyDetails)}
+          className="text-blue-400 hover:text-blue-300"
+        >
+          {showPrivacyDetails ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
       </div>
-      <ul className="text-blue-300 text-sm space-y-2">
-        <li>• Guardian addresses are not stored on-chain for privacy protection</li>
-        <li>• Only a cryptographic hash (Merkle root) is stored on the blockchain</li>
-        <li>• Guardians prove their eligibility using cryptographic proofs</li>
-        <li>• Guardian information is stored locally in your browser for recovery</li>
-      </ul>
+      
+      {showPrivacyDetails ? (
+        <div className="space-y-4">
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <h4 className="text-white font-medium mb-2">What&apos;s Stored On-Chain</h4>
+              <ul className="text-blue-300 text-sm space-y-1">
+                <li>• Cryptographic hash (Merkle root) of guardian addresses</li>
+                <li>• Recovery threshold (number of approvals needed)</li>
+                <li>• Recovery request status and timing</li>
+              </ul>
+            </div>
+            
+            <div>
+              <h4 className="text-white font-medium mb-2">What&apos;s NOT Stored On-Chain</h4>
+              <ul className="text-blue-300 text-sm space-y-1">
+                <li>• Individual guardian addresses</li>
+                <li>• Guardian names or identities</li>
+                <li>• Personal information</li>
+              </ul>
+            </div>
+          </div>
+          
+          <div className="bg-blue-900/20 border border-blue-500/20 rounded-lg p-3">
+            <p className="text-blue-300 text-sm">
+              <strong>How recovery works:</strong> Guardian information is stored locally in your browser 
+              and can be backed up using multiple methods. When you lose access, you can restore your 
+              guardian information and initiate recovery.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <p className="text-blue-300 text-sm">
+          Guardian addresses are not stored on-chain for privacy protection. 
+          Use backup methods to restore guardian information for recovery.
+        </p>
+      )}
     </div>
   )
 
@@ -454,7 +657,7 @@ You need to have the guardian information from when you initially set up the gua
           </div>
 
           {/* Privacy Info */}
-          <MerkleTreeInfo />
+          <PrivacyExplanation />
 
           {/* Info Card */}
           <div className="card p-6 bg-green-500/5 border-green-500/20">
@@ -462,9 +665,231 @@ You need to have the guardian information from when you initially set up the gua
             <ul className="text-green-300 text-sm space-y-2">
               <li>• Existing guardian configuration (Merkle root) for this wallet</li>
               <li>• Recovery threshold settings (how many approvals needed)</li>
-              <li>• Guardian information from your local browser storage</li>
               <li>• Any existing recovery requests in progress</li>
             </ul>
+          </div>
+        </div>
+      )}
+
+      {/* Restore Options Step */}
+      {currentStep === 'restore-options' && (
+        <div className="max-w-2xl mx-auto space-y-8 animate-scale-in">
+          <div className="text-center space-y-4">
+            <RefreshCw className="h-16 w-16 text-primary-500 mx-auto" />
+            <h2 className="text-2xl font-bold text-white">Restore Guardian Data</h2>
+            <p className="text-neutral-300">
+              Choose how you&apos;d like to restore your guardian information
+            </p>
+          </div>
+
+          {/* Contract Info */}
+          <div className="card p-6 bg-blue-500/5 border-blue-500/20">
+            <h3 className="text-blue-400 font-semibold mb-3">✅ Found On-Chain Setup</h3>
+            <div className="text-blue-300 text-sm space-y-1">
+              <p>• Guardian Merkle Root: {guardianRoot?.slice(0, 20)}...</p>
+              <p>• Required Approvals: {threshold}</p>
+              <p>• Wallet: {oldWalletAddress.slice(0, 10)}...{oldWalletAddress.slice(-10)}</p>
+            </div>
+          </div>
+
+          {/* Restore Methods */}
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* File Upload */}
+            <div className="card p-6 space-y-4">
+              <div className="flex items-center space-x-3">
+                <Upload className="h-6 w-6 text-primary-400" />
+                <h3 className="text-lg font-semibold text-white">Upload Backup File</h3>
+              </div>
+              <p className="text-neutral-300 text-sm">
+                Upload your guardian backup JSON file to restore your configuration.
+              </p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleFileRestore}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isProcessing}
+                className="btn-primary w-full"
+              >
+                {isProcessing ? 'Processing...' : 'Choose File'}
+              </button>
+            </div>
+
+            {/* QR Code Scanner */}
+            <div className="card p-6 space-y-4">
+              <div className="flex items-center space-x-3">
+                <QrCode className="h-6 w-6 text-primary-400" />
+                <h3 className="text-lg font-semibold text-white">Scan QR Code</h3>
+              </div>
+              <p className="text-neutral-300 text-sm">
+                Scan the QR code from your guardian backup to restore access.
+              </p>
+              <button
+                onClick={handleQRRestore}
+                disabled={isProcessing}
+                className="btn-primary w-full"
+              >
+                {isProcessing ? 'Processing...' : 'Scan QR Code'}
+              </button>
+            </div>
+
+            {/* Recovery Link */}
+            <div className="card p-6 space-y-4">
+              <div className="flex items-center space-x-3">
+                <Link className="h-6 w-6 text-primary-400" />
+                <h3 className="text-lg font-semibold text-white">Recovery Link</h3>
+              </div>
+              <p className="text-neutral-300 text-sm">
+                Paste your recovery link or encrypted guardian data.
+              </p>
+              <div className="space-y-2">
+                <textarea
+                  value={linkInput}
+                  onChange={(e) => setLinkInput(e.target.value)}
+                  placeholder="Paste recovery link or encrypted data here..."
+                  className="input-field w-full h-20 resize-none"
+                />
+                <button
+                  onClick={() => handleLinkRestore()}
+                  disabled={!linkInput || isProcessing}
+                  className="btn-primary w-full"
+                >
+                  {isProcessing ? 'Processing...' : 'Restore from Link'}
+                </button>
+              </div>
+            </div>
+
+            {/* Manual Entry (Last Resort) */}
+            <div className="card p-6 space-y-4">
+              <div className="flex items-center space-x-3">
+                <Edit className="h-6 w-6 text-warning-400" />
+                <h3 className="text-lg font-semibold text-white">Manual Entry</h3>
+              </div>
+              <p className="text-neutral-300 text-sm">
+                Enter guardian addresses manually if you don&apos;t have backup files.
+              </p>
+              <button
+                onClick={() => setCurrentStep('manual-entry')}
+                className="btn-secondary w-full"
+              >
+                Enter Manually
+              </button>
+            </div>
+          </div>
+
+          {/* Help Section */}
+          <div className="card p-6 bg-purple-500/5 border-purple-500/20">
+            <h3 className="text-purple-400 font-semibold mb-3">💡 Don&apos;t Have Backup Data?</h3>
+            <ul className="text-purple-300 text-sm space-y-2">
+              <li>• Check your downloads folder for guardian backup files</li>
+              <li>• Look for saved QR codes or recovery links in your notes</li>
+              <li>• Contact your guardians - they might have recovery information</li>
+              <li>• Check if you saved backup data in cloud storage or password manager</li>
+            </ul>
+          </div>
+
+          {/* Back Button */}
+          <div className="text-center">
+            <button
+              onClick={() => {
+                setCurrentStep('search')
+                setOldWalletAddress('')
+                setError(null)
+              }}
+              className="btn-ghost"
+            >
+              ← Try Different Wallet
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Entry Step */}
+      {currentStep === 'manual-entry' && (
+        <div className="max-w-2xl mx-auto space-y-8 animate-scale-in">
+          <div className="text-center space-y-4">
+            <Edit className="h-16 w-16 text-warning-500 mx-auto" />
+            <h2 className="text-2xl font-bold text-white">Enter Guardian Addresses</h2>
+            <p className="text-neutral-300">
+              Enter your guardian addresses manually. You need at least {threshold} guardians.
+            </p>
+          </div>
+
+          <div className="card p-6 space-y-6">
+            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4">
+              <h4 className="text-yellow-400 font-semibold mb-2">⚠️ Manual Entry</h4>
+              <p className="text-yellow-300 text-sm">
+                Only use this method if you don&apos;t have backup files. Make sure the addresses are correct 
+                as they need to match your original guardian setup exactly.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              {manualGuardians.map((guardian, index) => (
+                <div key={index} className="space-y-2">
+                  <div className="flex justify-between">
+                    <label className="text-white font-medium">Guardian {index + 1}</label>
+                    {manualGuardians.length > 1 && (
+                      <button
+                        onClick={() => removeManualGuardian(index)}
+                        className="text-error-400 hover:text-error-300 text-sm"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Guardian name (optional)"
+                    value={guardian.name}
+                    onChange={(e) => updateManualGuardian(index, 'name', e.target.value)}
+                    className="input-field w-full"
+                  />
+                  <input
+                    type="text"
+                    placeholder="0x... Guardian address"
+                    value={guardian.address}
+                    onChange={(e) => updateManualGuardian(index, 'address', e.target.value)}
+                    className="input-field w-full"
+                  />
+                  {guardian.address && !validateStarkNetAddress(guardian.address) && (
+                    <p className="text-error-400 text-sm">Invalid StarkNet address format</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-between">
+              <button
+                onClick={addManualGuardian}
+                className="btn-secondary"
+              >
+                Add Guardian
+              </button>
+              <span className="text-neutral-400 text-sm self-center">
+                {manualGuardians.filter(g => g.address && validateStarkNetAddress(g.address)).length} / {threshold} minimum
+              </span>
+            </div>
+
+            <div className="flex space-x-4">
+              <button
+                onClick={() => setCurrentStep('restore-options')}
+                className="btn-ghost flex-1"
+              >
+                ← Back
+              </button>
+              <button
+                onClick={confirmManualEntry}
+                disabled={manualGuardians.filter(g => g.address && validateStarkNetAddress(g.address)).length < (threshold || 1)}
+                className="btn-primary flex-1"
+              >
+                Confirm Guardians
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -477,7 +902,7 @@ You need to have the guardian information from when you initially set up the gua
               <AlertTriangle className="h-16 w-16 text-warning-500 mx-auto" />
               <h2 className="text-2xl font-bold text-white">Guardian Setup Issue</h2>
               <p className="text-neutral-300 max-w-md mx-auto">
-                Unable to find complete guardian recovery setup for this wallet.
+                Unable to find guardian recovery setup for this wallet.
               </p>
             </div>
             <div className="space-y-4">
@@ -500,7 +925,7 @@ You need to have the guardian information from when you initially set up the gua
           </div>
           
           {/* Privacy Info */}
-          <MerkleTreeInfo />
+          <PrivacyExplanation />
         </div>
       )}
 
@@ -511,7 +936,7 @@ You need to have the guardian information from when you initially set up the gua
             <Shield className="h-16 w-16 text-success-500 mx-auto" />
             <h2 className="text-2xl font-bold text-white">Recovery Setup Found!</h2>
             <p className="text-neutral-300">
-              We found your guardian configuration. Review and initiate recovery.
+              Guardian information restored successfully. Review and initiate recovery.
             </p>
           </div>
 
@@ -596,7 +1021,7 @@ You need to have the guardian information from when you initially set up the gua
         </div>
       )}
 
-      {/* Progress Step */}
+      {/* Progress Step - keeping existing implementation */}
       {currentStep === 'progress' && recovery && (
         <div className="space-y-8 animate-scale-in">
           {/* Status Header */}

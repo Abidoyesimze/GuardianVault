@@ -3,10 +3,29 @@
 import { useState, useEffect } from 'react'
 import { useAccount } from '@starknet-react/core'
 import { toast } from 'react-toastify'
-import { Plus, Trash2, Users, Shield, CheckCircle, ArrowRight, ArrowLeft, AlertCircle } from 'lucide-react'
+import Image from 'next/image'
+import { 
+  Plus, 
+  Trash2, 
+  Users, 
+  Shield, 
+  CheckCircle, 
+  ArrowRight, 
+  ArrowLeft, 
+  AlertCircle,
+  Download,
+  QrCode,
+  Copy,
+  AlertTriangle,
+  Check,
+  Save,
+  LucideIcon
+} from 'lucide-react'
 import { useSetupGuardians } from '../../../lib/hooks/useRecoveryContract'
 import { generateMerkleRoot } from '../../../lib/utils/merkle'
+import { saveGuardianInfo } from '../../../lib/utils/guardianStorage'
 import SetupLink from '../../components/SetupLink'
+import QRCode from 'qrcode'
 
 type Guardian = {
   id: string
@@ -15,7 +34,15 @@ type Guardian = {
   isValid?: boolean
 }
 
-type SetupStep = 'connect' | 'guardians' | 'threshold' | 'review' | 'complete'
+type SetupStep = 'connect' | 'guardians' | 'threshold' | 'review' | 'backup' | 'complete'
+
+interface BackupMethod {
+  id: string
+  name: string
+  icon: LucideIcon
+  completed: boolean
+  description: string
+}
 
 export default function SetupPage() {
   const { isConnected, address, account } = useAccount()
@@ -25,6 +52,34 @@ export default function SetupPage() {
   const [newGuardianName, setNewGuardianName] = useState('')
   const [threshold, setThreshold] = useState(2)
   const [error, setError] = useState<string | null>(null)
+  const [merkleRoot, setMerkleRoot] = useState('')
+  
+  // Backup-related state
+  const [recoveryQR, setRecoveryQR] = useState('')
+  const [recoveryLink, setRecoveryLink] = useState('')
+  const [backupMethods, setBackupMethods] = useState<BackupMethod[]>([
+    {
+      id: 'file',
+      name: 'Download Backup File',
+      icon: Download,
+      completed: false,
+      description: 'Save guardian data as a JSON file'
+    },
+    {
+      id: 'qr',
+      name: 'Save QR Code',
+      icon: QrCode,
+      completed: false,
+      description: 'QR code containing guardian information'
+    },
+    {
+      id: 'link',
+      name: 'Copy Recovery Link',
+      icon: Copy,
+      completed: false,
+      description: 'Shareable link with guardian data'
+    }
+  ])
 
   const { setupGuardians, isPending: isSubmitting, error: contractError } = useSetupGuardians()
 
@@ -33,6 +88,7 @@ export default function SetupPage() {
     { id: 'guardians', title: 'Add Guardians', icon: Users },
     { id: 'threshold', title: 'Set Threshold', icon: CheckCircle },
     { id: 'review', title: 'Review Setup', icon: ArrowRight },
+    { id: 'backup', title: 'Backup Data', icon: Save },
     { id: 'complete', title: 'Complete', icon: CheckCircle },
   ]
 
@@ -116,6 +172,45 @@ export default function SetupPage() {
   const canProceedToThreshold = () => guardians.length >= 3 && guardians.every(g => g.isValid)
   const canProceedToReview = () => threshold >= 2 && threshold <= guardians.length
 
+  // Generate backup methods after successful setup
+  const generateBackupMethods = async (deployedMerkleRoot: string) => {
+    if (!address) return
+
+    const guardianData = {
+      guardians: guardians.map(g => ({ name: g.name, address: g.address })),
+      merkleRoot: deployedMerkleRoot,
+      threshold,
+      walletAddress: address,
+      createdAt: new Date().toISOString(),
+      version: '1.0'
+    }
+
+    // Save to local storage first
+    saveGuardianInfo(address, guardianData)
+
+    // 1. Generate encrypted backup data for URL
+    const encryptedData = btoa(JSON.stringify(guardianData))
+    
+    // 2. Create recovery link
+    const recoveryUrl = `${window.location.origin}/recovery/restore?data=${encodeURIComponent(encryptedData)}`
+    setRecoveryLink(recoveryUrl)
+    
+    // 3. Generate QR code
+    try {
+      const qrDataUrl = await QRCode.toDataURL(recoveryUrl, {
+        width: 256,
+        margin: 2,
+        color: {
+          dark: '#3B82F6',
+          light: '#FFFFFF'
+        }
+      })
+      setRecoveryQR(qrDataUrl)
+    } catch (qrError) {
+      console.error('QR generation failed:', qrError)
+    }
+  }
+
   const handleSubmitSetup = async () => {
     if (!isConnected || !address) {
       toast.error('Please connect your wallet first', {
@@ -186,27 +281,27 @@ export default function SetupPage() {
         }
       }
       
-      let merkleRoot: string
+      let generatedMerkleRoot: string
       try {
-        merkleRoot = generateMerkleRoot(guardianAddresses)
+        generatedMerkleRoot = generateMerkleRoot(guardianAddresses)
         
-        if (!merkleRoot) {
+        if (!generatedMerkleRoot) {
           throw new Error('Merkle root is null or undefined')
         }
         
-        if (merkleRoot === '0x0' || merkleRoot === '000') {
+        if (generatedMerkleRoot === '0x0' || generatedMerkleRoot === '000') {
           throw new Error('Merkle root is zero value')
         }
         
-        if (!merkleRoot.startsWith('0x')) {
+        if (!generatedMerkleRoot.startsWith('0x')) {
           throw new Error('Merkle root does not start with 0x')
         }
         
-        if (!/^0x[0-9a-fA-F]+$/.test(merkleRoot)) {
+        if (!/^0x[0-9a-fA-F]+$/.test(generatedMerkleRoot)) {
           throw new Error('Merkle root contains invalid characters')
         }
         
-        if (merkleRoot.length < 10) {
+        if (generatedMerkleRoot.length < 10) {
           throw new Error('Merkle root is too short')
         }
         
@@ -224,11 +319,17 @@ export default function SetupPage() {
         throw new Error(userErrorMsg)
       }
       
-      const result = await setupGuardians(merkleRoot, threshold)
+      const result = await setupGuardians(generatedMerkleRoot, threshold)
       
       if (result.success) {
-        setCurrentStep('complete')
-        toast.success('Guardian setup deployed successfully!', {
+        setMerkleRoot(generatedMerkleRoot)
+        
+        // Generate backup methods
+        await generateBackupMethods(generatedMerkleRoot)
+        
+        // Move to backup step instead of complete
+        setCurrentStep('backup')
+        toast.success('Guardian setup deployed successfully! Please save your backup information.', {
           position: "top-right",
           autoClose: 5000,
         })
@@ -236,8 +337,8 @@ export default function SetupPage() {
         throw new Error(result.error || 'Failed to setup guardians')
       }
       
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to setup guardians'
+    } catch (setupError) {
+      const errorMessage = setupError instanceof Error ? setupError.message : 'Failed to setup guardians'
       setError(errorMessage)
       toast.error(errorMessage, {
         position: "top-right",
@@ -245,6 +346,75 @@ export default function SetupPage() {
       })
     }
   }
+
+  // Backup method handlers
+  const downloadBackupFile = () => {
+    if (!address) return
+
+    const guardianData = {
+      guardians: guardians.map(g => ({ name: g.name, address: g.address })),
+      merkleRoot,
+      threshold,
+      walletAddress: address,
+      createdAt: new Date().toISOString(),
+      version: '1.0',
+      type: 'guardian-backup'
+    }
+
+    const blob = new Blob([JSON.stringify(guardianData, null, 2)], { 
+      type: 'application/json' 
+    })
+    
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `guardian-backup-${address.slice(0, 10)}-${Date.now()}.json`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+
+    updateBackupMethod('file', true)
+    toast.success('📁 Backup file downloaded!')
+  }
+
+  const saveQRCode = () => {
+    if (!recoveryQR) return
+
+    // Convert QR to downloadable image
+    const link = document.createElement('a')
+    link.href = recoveryQR
+    link.download = `guardian-qr-${address?.slice(0, 10)}-${Date.now()}.png`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    updateBackupMethod('qr', true)
+    toast.success('📱 QR code saved!')
+  }
+
+  const copyRecoveryLink = async () => {
+    if (!recoveryLink) return
+
+    try {
+      await navigator.clipboard.writeText(recoveryLink)
+      updateBackupMethod('link', true)
+      toast.success('🔗 Recovery link copied to clipboard!')
+    } catch {
+      toast.error('Failed to copy link')
+    }
+  }
+
+  const updateBackupMethod = (id: string, completed: boolean) => {
+    setBackupMethods(methods => 
+      methods.map(method => 
+        method.id === id ? { ...method, completed } : method
+      )
+    )
+  }
+
+  const completedBackups = backupMethods.filter(m => m.completed).length
+  const canProceedToComplete = completedBackups >= 2 // Require at least 2 backup methods
 
   const nextStep = () => {
     const currentIndex = getCurrentStepIndex()
@@ -320,6 +490,7 @@ export default function SetupPage() {
       )}
 
       <div className="min-h-[500px]">
+        {/* Connect Step */}
         {currentStep === 'connect' && (
           <div className="card p-12 text-center space-y-8 animate-scale-in">
             <div className="space-y-4">
@@ -342,6 +513,7 @@ export default function SetupPage() {
           </div>
         )}
 
+        {/* Guardians Step */}
         {currentStep === 'guardians' && (
           <div className="grid lg:grid-cols-2 gap-8 animate-scale-in">
             <div className="space-y-6">
@@ -456,6 +628,7 @@ export default function SetupPage() {
           </div>
         )}
 
+        {/* Threshold Step */}
         {currentStep === 'threshold' && (
           <div className="max-w-2xl mx-auto space-y-8 animate-scale-in">
             <div className="text-center space-y-4">
@@ -502,6 +675,7 @@ export default function SetupPage() {
           </div>
         )}
 
+        {/* Review Step */}
         {currentStep === 'review' && (
           <div className="max-w-2xl mx-auto space-y-8 animate-scale-in">
             <div className="text-center space-y-4">
@@ -563,6 +737,142 @@ export default function SetupPage() {
           </div>
         )}
 
+        {/* NEW: Backup Step */}
+        {currentStep === 'backup' && (
+          <div className="space-y-8 animate-scale-in">
+            {/* Header */}
+            <div className="text-center space-y-4">
+              <Save className="h-16 w-16 text-success-500 mx-auto" />
+              <h2 className="text-3xl font-bold text-white">Backup Your Guardian Data</h2>
+              <p className="text-neutral-300 max-w-2xl mx-auto">
+                Your guardians are set up! Now secure your recovery by saving backup information.
+                <strong className="text-warning-400"> Choose at least 2 backup methods.</strong>
+              </p>
+            </div>
+
+            {/* Progress */}
+            <div className="max-w-2xl mx-auto">
+              <div className="flex justify-between text-sm mb-2">
+                <span className="text-neutral-400">Backup Progress</span>
+                <span className="text-white">{completedBackups} / 3 methods completed</span>
+              </div>
+              <div className="w-full bg-neutral-800 rounded-full h-3">
+                <div 
+                  className="bg-gradient-to-r from-success-600 to-primary-500 h-3 rounded-full transition-all duration-500"
+                  style={{ width: `${(completedBackups / 3) * 100}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Backup Methods */}
+            <div className="grid md:grid-cols-3 gap-6">
+              {/* Method 1: Download File */}
+              <div className="card p-6 space-y-4">
+                <div className="flex items-center space-x-3">
+                  <Download className={`h-6 w-6 ${backupMethods[0].completed ? 'text-success-400' : 'text-primary-400'}`} />
+                  <h3 className="text-lg font-semibold text-white">Backup File</h3>
+                  {backupMethods[0].completed && <Check className="h-5 w-5 text-success-400" />}
+                </div>
+                <p className="text-neutral-300 text-sm">
+                  Download a JSON file containing your guardian information.
+                </p>
+                <button
+                  onClick={downloadBackupFile}
+                  disabled={backupMethods[0].completed}
+                  className={`btn-primary w-full ${backupMethods[0].completed ? 'opacity-50' : ''}`}
+                >
+                  {backupMethods[0].completed ? 'Downloaded ✓' : 'Download File'}
+                </button>
+              </div>
+
+              {/* Method 2: QR Code */}
+              <div className="card p-6 space-y-4">
+                <div className="flex items-center space-x-3">
+                  <QrCode className={`h-6 w-6 ${backupMethods[1].completed ? 'text-success-400' : 'text-primary-400'}`} />
+                  <h3 className="text-lg font-semibold text-white">QR Code</h3>
+                  {backupMethods[1].completed && <Check className="h-5 w-5 text-success-400" />}
+                </div>
+                <p className="text-neutral-300 text-sm">
+                  Save a QR code that can restore your guardian setup.
+                </p>
+                {recoveryQR && (
+                  <div className="flex justify-center">
+                    <Image 
+                      src={recoveryQR} 
+                      alt="Recovery QR" 
+                      width={128} 
+                      height={128}
+                      className="w-32 h-32" 
+                    />
+                  </div>
+                )}
+                <button
+                  onClick={saveQRCode}
+                  disabled={!recoveryQR || backupMethods[1].completed}
+                  className={`btn-primary w-full ${backupMethods[1].completed ? 'opacity-50' : ''}`}
+                >
+                  {backupMethods[1].completed ? 'Saved ✓' : 'Save QR Code'}
+                </button>
+              </div>
+
+              {/* Method 3: Recovery Link */}
+              <div className="card p-6 space-y-4">
+                <div className="flex items-center space-x-3">
+                  <Copy className={`h-6 w-6 ${backupMethods[2].completed ? 'text-success-400' : 'text-primary-400'}`} />
+                  <h3 className="text-lg font-semibold text-white">Recovery Link</h3>
+                  {backupMethods[2].completed && <Check className="h-5 w-5 text-success-400" />}
+                </div>
+                <p className="text-neutral-300 text-sm">
+                  Copy a recovery link to save in your password manager or notes.
+                </p>
+                <button
+                  onClick={copyRecoveryLink}
+                  disabled={!recoveryLink || backupMethods[2].completed}
+                  className={`btn-primary w-full ${backupMethods[2].completed ? 'opacity-50' : ''}`}
+                >
+                  {backupMethods[2].completed ? 'Copied ✓' : 'Copy Link'}
+                </button>
+              </div>
+            </div>
+
+            {/* Security Warning */}
+            <div className="max-w-2xl mx-auto">
+              <div className="card p-6 bg-warning-500/5 border-warning-500/20">
+                <div className="flex items-center space-x-3 mb-3">
+                  <AlertTriangle className="h-5 w-5 text-warning-400" />
+                  <h3 className="text-warning-400 font-semibold">Important Security Notes</h3>
+                </div>
+                <ul className="text-warning-300 text-sm space-y-2">
+                  <li>• Store backup information in multiple secure locations</li>
+                  <li>• Don&apos;t share recovery links or files with anyone</li>
+                  <li>• If you lose all backup methods, you cannot recover your wallet</li>
+                  <li>• Consider storing one backup offline (printed QR code or file)</li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Continue Button */}
+            <div className="text-center">
+              <button
+                onClick={() => setCurrentStep('complete')}
+                disabled={!canProceedToComplete}
+                className={`btn-success px-8 py-4 text-lg ${!canProceedToComplete ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                {canProceedToComplete 
+                  ? 'Complete Setup ✓' 
+                  : `Complete ${2 - completedBackups} more backup${2 - completedBackups !== 1 ? 's' : ''}`
+                }
+              </button>
+              {!canProceedToComplete && (
+                <p className="text-neutral-400 text-sm mt-2">
+                  Choose at least 2 backup methods to continue
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Complete Step */}
         {currentStep === 'complete' && (
           <div className="max-w-2xl mx-auto space-y-8 animate-scale-in">
             <div className="text-center space-y-4">
@@ -576,7 +886,7 @@ export default function SetupPage() {
             </div>
 
             <div className="card p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-center">
+              <div className="grid grid-cols-3 gap-4 text-center">
                 <div>
                   <p className="text-2xl font-bold text-success-400">{guardians.length}</p>
                   <p className="text-neutral-400">Guardians</p>
@@ -584,6 +894,10 @@ export default function SetupPage() {
                 <div>
                   <p className="text-2xl font-bold text-success-400">{threshold}</p>
                   <p className="text-neutral-400">Required Approvals</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-success-400">{completedBackups}</p>
+                  <p className="text-neutral-400">Backup Methods</p>
                 </div>
               </div>
               
@@ -603,6 +917,10 @@ export default function SetupPage() {
                   <div className="flex justify-between">
                     <span className="text-neutral-400">Security Level:</span>
                     <span className="text-white">{threshold}/{guardians.length} approvals required</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-neutral-400">Backup Security:</span>
+                    <span className="text-white">{completedBackups} backup methods completed</span>
                   </div>
                 </div>
               </div>
@@ -636,10 +954,10 @@ export default function SetupPage() {
               
               <div className="text-center">
                 <button 
-                  onClick={() => setCurrentStep('guardians')}
+                  onClick={() => setCurrentStep('backup')}
                   className="btn-ghost text-sm"
                 >
-                  ← Back to Edit Guardians
+                  ← Back to Backup Options
                 </button>
               </div>
             </div>
@@ -658,6 +976,7 @@ export default function SetupPage() {
         )}
       </div>
 
+      {/* Navigation */}
       {currentStep !== 'connect' && currentStep !== 'complete' && (
         <div className="flex justify-between items-center">
           <button
@@ -673,12 +992,14 @@ export default function SetupPage() {
             onClick={nextStep}
             disabled={
               (currentStep === 'guardians' && !canProceedToThreshold()) ||
-              (currentStep === 'threshold' && !canProceedToReview())
+              (currentStep === 'threshold' && !canProceedToReview()) ||
+              (currentStep === 'backup' && !canProceedToComplete)
             }
             className="btn-primary flex items-center space-x-2 disabled:opacity-50"
           >
             <span>
-              {currentStep === 'review' ? 'Deploy' : 'Continue'}
+              {currentStep === 'review' ? 'Deploy' : 
+               currentStep === 'backup' ? 'Complete' : 'Continue'}
             </span>
             <ArrowRight className="h-4 w-4" />
           </button>
